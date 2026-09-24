@@ -1,5 +1,4 @@
 import Foundation
-import FoundationXML
 
 public enum YouTubeTranscriptParser {
     public static func parse(_ data: Data) throws -> [TranscriptCue] {
