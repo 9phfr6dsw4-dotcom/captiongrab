@@ -7,6 +7,7 @@
 
   const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+  const TRANSCRIPT_CUE_SELECTOR = 'ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment';
 
   function parseTimestamp(value) {
     if (typeof value !== 'string') return null;
@@ -36,6 +37,11 @@
       cues.push({ startTimeMilliseconds, text });
     }
     return cues;
+  }
+
+  function extractTranscriptCues(panel) {
+    const rows = domElements(panel).filter(node => matchesDOM(node, TRANSCRIPT_CUE_SELECTOR));
+    return extractCues(rows);
   }
 
   function choosePreferredEnglishLanguage(availableLanguages) {
@@ -190,8 +196,7 @@
   }
 
   function transcriptCueSnapshot(panel) {
-    const selector = 'ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment';
-    const rows = domElements(panel).filter(node => matchesDOM(node, selector) && isVisibleDOM(node, panel?.ownerDocument));
+    const rows = domElements(panel).filter(node => matchesDOM(node, TRANSCRIPT_CUE_SELECTOR) && isVisibleDOM(node, panel?.ownerDocument));
     return { rows, signature: JSON.stringify(rows.map(node => nodeText(node))) };
   }
 
@@ -325,6 +330,7 @@
   return {
     parseTimestamp,
     extractCues,
+    extractTranscriptCues,
     choosePreferredEnglishLanguage,
     selectPreferredEnglishTranscript,
     buildCaptureMessage

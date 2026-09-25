@@ -192,6 +192,22 @@ test('extracts ordered cues and preserves explicit caption line breaks', () => {
   ]);
 });
 
+test('extracts transcript cue rows from the modern panel shadow root', () => {
+  const panel = new FakeDOMNode({ tag: 'ytd-engagement-panel-section-list-renderer' });
+  const shadowRoot = new FakeDOMNode({ tag: 'shadow-root' });
+  shadowRoot.host = panel;
+  panel.shadowRoot = shadowRoot;
+  const row = new FakeDOMNode({ tag: 'yt-transcript-segment-renderer' });
+  row.querySelector = selector => selector.includes('timestamp')
+    ? element('1:23')
+    : selector.includes('text') ? element('Synthetic auto-generated line.') : null;
+  shadowRoot.append(row);
+
+  assert.deepEqual(extractor.extractTranscriptCues(panel), [
+    { startTimeMilliseconds: 83_000, text: 'Synthetic auto-generated line.' }
+  ]);
+});
+
 test('rejects empty and malformed transcript segments', () => {
   assert.deepEqual(extractor.extractCues([segment('0:01', '  \n  ')]), []);
   assert.deepEqual(extractor.extractCues([segment('bad', 'Synthetic text')]), []);
@@ -435,7 +451,7 @@ test('extension manifest requests only the YouTube page and native-messaging per
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.permissions, ['nativeMessaging']);
   assert.deepEqual(manifest.host_permissions, ['https://www.youtube.com/*']);
-  assert.equal(manifest.version, '1.2.6');
+  assert.equal(manifest.version, '1.2.7');
   assert.deepEqual(manifest.content_scripts[0].js, ['transcript-extractor.js', 'transcript-panel-opener.js', 'content.js']);
   const panelOpenerSource = await readFile(path.join(root, 'ChromeExtension/transcript-panel-opener.js'), 'utf8');
   assert.ok(panelOpenerSource.includes('Show transcript'));

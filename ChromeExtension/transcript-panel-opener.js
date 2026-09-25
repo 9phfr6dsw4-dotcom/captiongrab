@@ -173,8 +173,15 @@
     return null;
   }
 
+  function nodesIncludingShadow(scope, selector) {
+    return [...new Set([
+      ...nodes(scope, selector),
+      ...allElements(scope).filter(node => node.matches?.(selector))
+    ])];
+  }
+
   function findTranscriptTab(panel) {
-    return nodes(panel, TRANSCRIPT_TAB_SELECTOR).find(node => visible(node, panel) && labels(node).some(value =>
+    return nodesIncludingShadow(panel, TRANSCRIPT_TAB_SELECTOR).find(node => visible(node, panel) && labels(node).some(value =>
       /^transcript$/i.test(value) || value.toLowerCase() === 'transcript tab'
     )) ?? null;
   }
@@ -190,7 +197,7 @@
   }
 
   function hasTranscriptLines(panel) {
-    return nodes(panel, TRANSCRIPT_LINE_SELECTOR).some(node => visible(node, panel));
+    return nodesIncludingShadow(panel, TRANSCRIPT_LINE_SELECTOR).some(node => visible(node, panel));
   }
 
   function isTranscriptRelatedEngagementPanel(panel) {

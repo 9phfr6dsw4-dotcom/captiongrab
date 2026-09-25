@@ -17,9 +17,7 @@
   }
 
   function transcriptCues(panel) {
-    const scope = panel || document;
-    const segments = scope.querySelectorAll('ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment');
-    return extractor.extractCues(segments);
+    return extractor.extractTranscriptCues(panel || document);
   }
 
   function languageSelectionError(selection) {

@@ -537,6 +537,37 @@ test('recognizes a newly opened Chapters panel and switches it to Transcript', a
   assert.equal(result.progress.transcriptTabSelected, true);
 });
 
+test('finds the Transcript tab in a modern transcript panel shadow root and waits for its rows', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  let transcriptTab;
+  let panel;
+  show.onClick = () => {
+    panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
+    shadowRoot.host = panel;
+    panel.shadowRoot = shadowRoot;
+    shadowRoot.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Chapters', attributes: { 'aria-selected': 'true' } }));
+    transcriptTab = shadowRoot.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false' } }));
+    transcriptTab.onClick = () => {
+      transcriptTab.attributes['aria-selected'] = 'true';
+      shadowRoot.append(new FakeElement({ tag: 'yt-transcript-segment-renderer', text: 'Loaded synthetic auto-generated caption.' }));
+    };
+  };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(result.panel.getAttribute('target-id'), 'PAmodern_transcript_view');
+  assert.equal(transcriptTab.clickCount, 1);
+  assert.equal(result.progress.transcriptTabSelected, true);
+  assert.equal(result.progress.transcriptLinesLoaded, true);
+});
+
 test('waits for transcript rows when the Transcript tab is already selected without toggling it', async () => {
   const document = new FakeDocument();
   const panel = document.append(new FakeElement({ tag: 'ytd-engagement-panel-section-list-renderer', text: 'In this video' }));
