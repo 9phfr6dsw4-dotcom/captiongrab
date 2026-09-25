@@ -19,6 +19,8 @@ jobs:
           xcodebuild -version
           xcrun --sdk macosx --show-sdk-version
           test "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -ge 26
+      - name: Run Chrome extension fixture tests
+        run: node --test Tests/ChromeExtensionTests/*.test.mjs
       - name: Run synthetic-fixture tests
         run: swift test
       - name: Build, package, and verify app

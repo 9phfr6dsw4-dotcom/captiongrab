@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "CaptionGrab YouTube Transcript",
+  "description": "Reads the English transcript shown on the YouTube page opened by CaptionGrab and sends it to the local macOS app.",
+  "version": "1.1.0",
+  "minimum_chrome_version": "120",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyuuKoZiaouornLw+vy+6IoXnXYO8ifKaLKXDHhLN5JFiP2BVxPmSdfg9x56MMO4sZfbj1k/C1vKV+UYi9260az+R8PKdLh6jFQgNbS/EnWaiaHf13fmOht9npPXgUDI8h5PoDsekVgyPDDQqM5eUcZ9AAHpjKNhV/1KR4WsRf3TMl21gJF7UA7yed1d1MYzj2gaMjz6C+suY1xxCzDkj8YpIPYKVxCu3+fXO2luZ4dunzYRlpItXbGs6ApoxqN87r2xVmoVl0P7dv2AmrT4MgUkFF23SYtR862zr7xg8MhcvIHdgTP1+c2Fe8oT06W7b8QqT6W7IIa+1aJuEQtpEcQIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["transcript-extractor.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
