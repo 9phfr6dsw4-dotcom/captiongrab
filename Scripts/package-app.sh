@@ -13,7 +13,11 @@ MACOSX_DEPLOYMENT_TARGET=26.0 swift build -c release --product CaptionGrabNative
 install -m 755 .build/release/CaptionGrab "$APP/Contents/MacOS/CaptionGrab"
 install -m 755 .build/release/CaptionGrabNativeHost "$APP/Contents/MacOS/CaptionGrabNativeHost"
 cp -R ChromeExtension/. "$APP/Contents/Resources/ChromeExtension/"
-python3 Scripts/test-native-host.py "$APP/Contents/MacOS/CaptionGrabNativeHost"
+if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+  python3 Scripts/test-native-host.py "$APP/Contents/MacOS/CaptionGrabNativeHost"
+else
+  printf 'Skipping Native Messaging host execution outside isolated CI.\n'
+fi
 test -x "$APP/Contents/MacOS/CaptionGrabNativeHost"
 test -f "$APP/Contents/Resources/ChromeExtension/manifest.json"
 cp Resources/Info.plist "$APP/Contents/Info.plist"

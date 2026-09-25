@@ -4,7 +4,6 @@ public enum ChromeCompanionConstants {
     public static let nativeHostName = "com.captiongrab.host"
     public static let extensionID = "kajphiodjnkmgeidbcndikaaegghiffi"
     public static let nativeHostManifestFileName = "\(nativeHostName).json"
-    public static let applicationBundleIdentifier = "com.captiongrab.app"
     public static let supportDirectoryName = "CaptionGrab"
     public static let inboxDirectoryName = "ChromeInbox"
     public static let requestQueryName = "captiongrab_request"
@@ -23,8 +22,11 @@ public enum ChromeCompanionConstants {
     }
 
     public static func inboxDirectory(homeURL: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
-        homeURL
-            .appendingPathComponent("Library/Containers/\(applicationBundleIdentifier)/Data/Library/Application Support", isDirectory: true)
+        inboxDirectory(chromeRootURL: chromeProfileDirectory(homeURL: homeURL))
+    }
+
+    public static func inboxDirectory(chromeRootURL: URL) -> URL {
+        chromeRootURL
             .appendingPathComponent(supportDirectoryName, isDirectory: true)
             .appendingPathComponent(inboxDirectoryName, isDirectory: true)
     }

@@ -41,7 +41,7 @@ enum ChromeCompanionSetup {
         ChromeCompanionConstants.chromeProfileDirectory().standardizedFileURL
     }
 
-    private static func savedChromeRoot() -> URL? {
+    static func savedChromeRoot() -> URL? {
         guard let data = UserDefaults.standard.data(forKey: ChromeCompanionConstants.chromeFolderBookmarkKey) else { return nil }
         var stale = false
         guard let folder = try? URL(
@@ -127,7 +127,7 @@ enum ChromeCompanionSetup {
             }
         }
 
-        let inbox = ChromeCompanionConstants.inboxDirectory()
+        let inbox = ChromeCompanionConstants.inboxDirectory(chromeRootURL: chromeRoot)
         let manifest = ChromeNativeMessagingManifest(
             name: ChromeCompanionConstants.nativeHostName,
             description: description,

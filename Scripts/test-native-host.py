@@ -53,11 +53,9 @@ def main() -> int:
     inbox = (
         Path.home()
         / "Library"
-        / "Containers"
-        / "com.captiongrab.app"
-        / "Data"
-        / "Library"
         / "Application Support"
+        / "Google"
+        / "Chrome"
         / "CaptionGrab"
         / "ChromeInbox"
     )
@@ -68,6 +66,11 @@ def main() -> int:
             raise RuntimeError("Native host did not persist the expected synthetic transcript.")
     finally:
         result_file.unlink(missing_ok=True)
+        for directory in (inbox, inbox.parent, inbox.parent.parent):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
     print("Native Messaging host frame, origin, validation, and local inbox test passed.")
     return 0
 

@@ -25,13 +25,18 @@ private enum ChromeTranscriptBridgeError: Error, LocalizedError {
 @MainActor
 enum ChromeTranscriptBridge {
     static func fetch(link: YouTubeLink, timeout: Duration = .seconds(90)) async throws -> TranscriptData {
+        guard let chromeRoot = ChromeCompanionSetup.savedChromeRoot(),
+              chromeRoot.startAccessingSecurityScopedResource() else {
+            throw ChromeTranscriptBridgeError.setupRequired
+        }
+        defer { chromeRoot.stopAccessingSecurityScopedResource() }
         guard ChromeCompanionSetup.isRegistered() else { throw ChromeTranscriptBridgeError.setupRequired }
         guard let chromeURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") else {
             throw ChromeTranscriptBridgeError.chromeMissing
         }
 
         let requestID = UUID().uuidString.lowercased()
-        let inbox = ChromeCompanionConstants.inboxDirectory()
+        let inbox = ChromeCompanionConstants.inboxDirectory(chromeRootURL: chromeRoot)
         try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
         let resultURL = inbox.appendingPathComponent("\(requestID).json")
         try? FileManager.default.removeItem(at: resultURL)

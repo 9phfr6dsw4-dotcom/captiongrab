@@ -24,7 +24,7 @@ Download the latest `CaptionGrab.zip` from [GitHub Releases](https://github.com/
 | Chrome fallback | Open CaptionGrab and click **Set up Chrome extension**. Approve the folder prompt for `Library/Application Support/Google/Chrome`. In Chrome's extensions page, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder shown in Finder. |
 | Automatic capture | Click **Get transcript** as usual. When direct retrieval is blocked, CaptionGrab opens the matching YouTube page in Chrome, reads the English transcript panel, and imports it locally. |
 | Stable extension ID | The unpacked extension's `manifest.json` contains its public `key`; its ID remains `kajphiodjnkmgeidbcndikaaegghiffi` if you move the extension folder. |
-| Local-only bridge | The extension needs only YouTube page access and `nativeMessaging`. It reads transcript text from the displayed page and sends it to a local helper; it does not request cookie access. Captured data stays in CaptionGrab's local app container. |
+| Local-only bridge | The extension needs only YouTube page access and `nativeMessaging`. It reads transcript text from the displayed page and sends it to a local helper; it does not request cookie access. Captured data stays in a CaptionGrab subfolder of Chrome's local profile. |
 
 Keep CaptionGrab in its installed location after setup. If you move the app itself, click **Set up Chrome extension** again so Chrome's local helper registration can be refreshed. You can move the extension folder without changing the extension ID.
 
