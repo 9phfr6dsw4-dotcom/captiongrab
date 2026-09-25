@@ -11,6 +11,13 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             linkEntry
+            HStack {
+                Spacer()
+                Button(action: model.setupChromeExtension) {
+                    Label("Set up Chrome extension", systemImage: "puzzlepiece.extension")
+                }
+                .buttonStyle(.bordered)
+            }
             feedback
             transcriptPanel
             historyPanel
