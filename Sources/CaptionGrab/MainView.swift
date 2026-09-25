@@ -82,10 +82,32 @@ struct MainView: View {
                         Button("Quit CaptionGrab", action: model.quitCaptionGrab)
                     }
                 }
+                debugLogButton
+                if model.didCopyChromeDebugLog {
+                    Text("Debug log copied. Paste it into your reply.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         } else if let notice = model.noticeMessage {
-            Label(notice, systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 8) {
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                debugLogButton
+            }
+        } else {
+            debugLogButton
+        }
+    }
+
+    @ViewBuilder
+    private var debugLogButton: some View {
+        if model.chromeDebugLog != nil {
+            Button(action: model.copyDebugLog) {
+                Label("Copy debug log", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.bordered)
+            .help("Copies the Chrome transcript automation steps and timing. It does not include caption text.")
         }
     }
 

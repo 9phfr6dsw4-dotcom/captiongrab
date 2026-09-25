@@ -47,12 +47,16 @@ public struct ChromeTranscriptMessage: Codable, Equatable, Sendable {
     public let cues: [TranscriptCue]?
     public let error: String?
     public let progress: ChromeTranscriptProgress?
+    public let debugLog: String?
 
     public func makeTranscript(
         expectedRequestID: String,
         expectedVideoID: String,
         canonicalURL: URL
     ) throws -> TranscriptData {
+        guard (debugLog?.count ?? 0) <= 30_000 else {
+            throw ChromeTranscriptMessageError.invalidMessage("Chrome returned an oversized diagnostic log.")
+        }
         guard let requestUUID = UUID(uuidString: requestID),
               let expectedUUID = UUID(uuidString: expectedRequestID),
               requestUUID == expectedUUID,

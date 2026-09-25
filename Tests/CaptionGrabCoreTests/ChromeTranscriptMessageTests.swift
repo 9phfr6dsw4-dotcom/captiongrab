@@ -71,6 +71,44 @@ final class ChromeTranscriptMessageTests: XCTestCase {
         }
     }
 
+    func testDecodesExtensionDebugLogForCopyInTheApp() throws {
+        let log = "[+0ms] automation started {\"readyState\":\"complete\"}\n[+300ms] clicked Show transcript control"
+        let object: [String: Any] = [
+            "type": "captiongrab.error",
+            "requestID": requestID,
+            "videoID": videoID,
+            "error": "Show transcript was not clicked.",
+            "debugLog": log
+        ]
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: data)
+        XCTAssertEqual(message.debugLog, log)
+        XCTAssertThrowsError(try message.makeTranscript(
+            expectedRequestID: requestID,
+            expectedVideoID: videoID,
+            canonicalURL: videoURL
+        ))
+    }
+
+    func testRejectsOversizedExtensionDebugLog() throws {
+        let object: [String: Any] = [
+            "type": "captiongrab.error",
+            "requestID": requestID,
+            "videoID": videoID,
+            "error": "Synthetic failure.",
+            "debugLog": String(repeating: "x", count: 30_001)
+        ]
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: data)
+        XCTAssertThrowsError(try message.makeTranscript(
+            expectedRequestID: requestID,
+            expectedVideoID: videoID,
+            canonicalURL: videoURL
+        )) { error in
+            XCTAssertEqual(error as? ChromeTranscriptMessageError, .invalidMessage("Chrome returned an oversized diagnostic log."))
+        }
+    }
+
     func testReturnsExplicitErrorFromSyntheticBrowserResponse() throws {
         let fixture = #"{"type":"captiongrab.error","requestID":"e6b7b1e7-cc6d-4d34-9ab9-c8ec20dd85ce","videoID":"5fJl_ZX91l0","error":"YouTube did not show an English transcript."}"#
         let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: Data(fixture.utf8))

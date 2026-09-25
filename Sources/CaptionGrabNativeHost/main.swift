@@ -58,6 +58,7 @@ func validate(_ message: ChromeTranscriptMessage) throws -> UUID {
               CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-").contains($0)
           }) else { throw NativeHostFailure.invalidRequest }
 
+    guard (message.debugLog?.count ?? 0) <= 30_000 else { throw NativeHostFailure.invalidRequest }
     if message.type == "captiongrab.transcript" {
         let canonicalURL = URL(string: "https://www.youtube.com/watch?v=\(message.videoID)")!
         _ = try message.makeTranscript(

@@ -13,6 +13,9 @@
   const ENGAGEMENT_PANEL_SELECTOR = 'ytd-engagement-panel-section-list-renderer, yt-engagement-panel-section-list-renderer';
   const TRANSCRIPT_TAB_SELECTOR = 'button, [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, yt-button-shape, ytd-button-renderer';
   const TRANSCRIPT_LINE_SELECTOR = 'ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment';
+  const TRANSCRIPT_BUTTON_SEARCH_MS = 10_000;
+  const MAX_DEBUG_LOG_CHARS = 30_000;
+  const MAX_DEBUG_EVENTS = 300;
   const MANUAL_ACTIONS = 'In the Chrome video tab, expand “...more” in the description if shown, scroll down to the Transcript section, and click the “Show transcript” button. If the “In this video” panel opens on “Chapters,” click its “Transcript” tab. Wait for transcript lines to appear, then try Get transcript again.';
 
   function nodes(scope, selector) {
@@ -112,7 +115,12 @@
     let candidate = node;
     while (candidate && candidate !== boundary) {
       if (candidate.matches?.(CONTROL_SELECTOR)) return candidate;
-      candidate = candidate.parentElement;
+      const parent = candidate.parentElement;
+      if (parent) {
+        candidate = parent;
+      } else {
+        candidate = candidate.getRootNode?.()?.host ?? null;
+      }
     }
     return node;
   }
@@ -169,6 +177,55 @@
     return { ...progress };
   }
 
+  function describeControl(node, document = null) {
+    const values = labels(node);
+    return {
+      tag: String(node?.tagName ?? '').toLowerCase(),
+      id: String(node?.id ?? '').slice(0, 120),
+      role: String(node?.getAttribute?.('role') ?? '').slice(0, 80),
+      text: String(node?.innerText ?? node?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
+      ariaLabel: String(node?.getAttribute?.('aria-label') ?? '').slice(0, 180),
+      title: String(node?.getAttribute?.('title') ?? '').slice(0, 120),
+      labels: values.slice(0, 4).map(value => value.slice(0, 180)),
+      visible: document ? visible(node, document) : Boolean(node && node.isConnected !== false && !node.hidden && node.getAttribute?.('aria-hidden') !== 'true')
+    };
+  }
+
+  function describePanel(node, document) {
+    return {
+      tag: String(node?.tagName ?? '').toLowerCase(),
+      id: String(node?.id ?? '').slice(0, 120),
+      targetId: String(node?.getAttribute?.('target-id') ?? node?.getAttribute?.('targetId') ?? '').slice(0, 160),
+      ariaLabel: String(node?.getAttribute?.('aria-label') ?? '').slice(0, 160),
+      visible: visible(node, document)
+    };
+  }
+
+  function inspectPage(document, pageReady) {
+    const pageElements = allElements(document);
+    const controls = pageElements
+      .filter(node => node.matches?.(`${CONTROL_SELECTOR}, [role="tab"], tp-yt-paper-tab, yt-tab-shape`) && labels(node).some(value => /transcript|chapter/i.test(value)))
+      .slice(0, 40)
+      .map(node => describeControl(node, document));
+    const panels = pageElements
+      .filter(node => node.matches?.(`${ENGAGEMENT_PANEL_SELECTOR}, ${TRANSCRIPT_PANEL_SELECTOR}`))
+      .filter(node => visible(node, document))
+      .slice(0, 12)
+      .map(node => describePanel(node, document));
+    const section = findTranscriptSection(document);
+    return {
+      readyState: String(document?.readyState ?? 'unknown'),
+      pageReady: Boolean(pageReady),
+      transcriptSection: section ? {
+        tag: String(section.tagName ?? '').toLowerCase(),
+        id: String(section.id ?? '').slice(0, 120),
+        visible: visible(section, document)
+      } : null,
+      transcriptRelatedControls: controls,
+      openPanels: panels
+    };
+  }
+
   function progressSummary(progress) {
     const state = value => value ? 'yes' : 'no';
     return [
@@ -188,7 +245,9 @@
       ? 'The YouTube page did not finish loading in time.'
       : reason === 'panel-not-loaded'
         ? 'YouTube did not show the transcript panel after CaptionGrab clicked its button.'
-        : 'CaptionGrab could not find YouTube’s transcript button automatically.';
+        : reason === 'button-not-clicked'
+          ? 'CaptionGrab found the transcript button but could not click it before the search window ended.'
+          : 'CaptionGrab could not find YouTube’s transcript button automatically.';
     return `${prefix} ${MANUAL_ACTIONS}${progress ? `\n\n${progressSummary(progress)}` : ''}`;
   }
 
@@ -198,9 +257,30 @@
     sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
     now = () => Date.now(),
     timeoutMs = 45_000,
-    pollIntervalMs = 300
+    pollIntervalMs = 300,
+    transcriptButtonTimeoutMs = TRANSCRIPT_BUTTON_SEARCH_MS
   } = {}) {
     const startedAt = now();
+    const debugEvents = [];
+    let lastObservation = '';
+    let lastObservationAt = startedAt - 1_000;
+    let lastHeartbeatAt = startedAt - 1_000;
+    let lastReadyState = null;
+    let pollCount = 0;
+    let transcriptButtonSearchDeadline = null;
+    const record = (event, details = null) => {
+      const elapsed = Math.max(0, now() - startedAt);
+      const suffix = details === null ? '' : ` ${JSON.stringify(details)}`;
+      debugEvents.push(`[+${elapsed}ms] ${event}${suffix}`);
+      if (debugEvents.length > MAX_DEBUG_EVENTS) debugEvents.shift();
+    };
+    const debugLog = () => {
+      const value = debugEvents.join('\n');
+      if (value.length <= MAX_DEBUG_LOG_CHARS) return value;
+      const marker = '[earlier log text omitted]\n';
+      return marker + value.slice(-(MAX_DEBUG_LOG_CHARS - marker.length));
+    };
+    record('automation started', { readyState: String(document?.readyState ?? 'unknown'), transcriptButtonTimeoutMs });
     const progress = {
       descriptionExpanded: false,
       transcriptSectionFound: false,
@@ -214,11 +294,39 @@
     const scrolledTranscriptSections = new WeakSet();
 
     while (now() - startedAt < timeoutMs) {
+      pollCount += 1;
       let ready = false;
       try {
         ready = Boolean(isPageReady());
       } catch {
         ready = false;
+      }
+      if (ready !== lastReadyState || now() - lastObservationAt >= 750) {
+        if (ready) {
+          const snapshot = inspectPage(document, ready);
+          const serialized = JSON.stringify(snapshot);
+          if (serialized !== lastObservation) record('page observation', snapshot);
+          lastObservation = serialized;
+        } else {
+          record('page not ready', { readyState: String(document?.readyState ?? 'unknown') });
+        }
+        lastObservationAt = now();
+        lastReadyState = ready;
+      }
+      if (now() - lastHeartbeatAt >= 1_000) {
+        const elapsedSinceExpandMs = transcriptButtonSearchDeadline === null
+          ? null
+          : Math.max(0, now() - (transcriptButtonSearchDeadline - transcriptButtonTimeoutMs));
+        record(ready ? 'retrying transcript controls' : 'waiting for page to load', {
+          pollCount,
+          pageReady: ready,
+          elapsedMs: now() - startedAt,
+          elapsedSinceExpandMs,
+          transcriptButtonSearchRemainingMs: transcriptButtonSearchDeadline === null
+            ? null
+            : Math.max(0, transcriptButtonSearchDeadline - now())
+        });
+        lastHeartbeatAt = now();
       }
       if (!ready) {
         await sleep(pollIntervalMs);
@@ -227,45 +335,60 @@
 
       const transcriptPanel = findTranscriptPanel(document);
       if (transcriptPanel && hasTranscriptLines(transcriptPanel)) {
+        if (!progress.panelOpened) record('transcript panel opened and transcript rows observed', inspectPage(document, ready).openPanels);
         progress.panelOpened = true;
         const transcriptTab = findTranscriptTab(transcriptPanel);
         if (transcriptTab && !transcriptTabIsSelected(transcriptTab) && !clickedTranscriptTabs.has(transcriptTab)) {
           try {
-            transcriptTab.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+            scrollIntoView(transcriptTab);
+            record('clicked Transcript tab', describeControl(transcriptTab));
             transcriptTab.click();
             clickedTranscriptTabs.add(transcriptTab);
             progress.transcriptTabSelected = true;
-          } catch {
-            // Keep waiting for YouTube to update the tab state after selection.
+          } catch (error) {
+            record('Transcript tab click threw', { error: String(error).slice(0, 240) });
           }
           await sleep(pollIntervalMs);
           continue;
         }
         progress.transcriptTabSelected = Boolean(transcriptTab && transcriptTabIsSelected(transcriptTab));
         progress.transcriptLinesLoaded = true;
-        return { ok: true, panel: transcriptPanel, opened: progress.transcriptButtonClicked, progress: progressSnapshot(progress) };
+        record('transcript lines loaded', { panel: describePanel(transcriptPanel, document), transcriptTabSelected: progress.transcriptTabSelected });
+        return {
+          ok: true, panel: transcriptPanel, opened: progress.transcriptButtonClicked,
+          progress: progressSnapshot(progress), debugLog: debugLog(), elapsedMs: now() - startedAt
+        };
       }
 
       if (progress.transcriptButtonClicked) {
         if (transcriptPanel) {
+          if (!progress.panelOpened) record('transcript panel appeared after Show transcript click', inspectPage(document, ready).openPanels);
           progress.panelOpened = true;
           const transcriptTab = findTranscriptTab(transcriptPanel);
           if (transcriptTab && !transcriptTabIsSelected(transcriptTab) && !clickedTranscriptTabs.has(transcriptTab)) {
             try {
               scrollIntoView(transcriptTab);
+              record('clicked Transcript tab', describeControl(transcriptTab));
               transcriptTab.click();
               clickedTranscriptTabs.add(transcriptTab);
               progress.transcriptTabSelected = true;
-            } catch {
-              // Keep waiting: YouTube may replace or hydrate its tab after the click.
+            } catch (error) {
+              record('Transcript tab click threw', { error: String(error).slice(0, 240) });
             }
             await sleep(pollIntervalMs);
             continue;
           }
-          if (transcriptTab && transcriptTabIsSelected(transcriptTab)) progress.transcriptTabSelected = true;
+          if (transcriptTab && transcriptTabIsSelected(transcriptTab) && !progress.transcriptTabSelected) {
+            progress.transcriptTabSelected = true;
+            record('Transcript tab is selected', describeControl(transcriptTab));
+          }
           if (hasTranscriptLines(transcriptPanel)) {
             progress.transcriptLinesLoaded = true;
-            return { ok: true, panel: transcriptPanel, opened: true, progress: progressSnapshot(progress) };
+            record('transcript lines loaded', { panel: describePanel(transcriptPanel, document), transcriptTabSelected: progress.transcriptTabSelected });
+            return {
+              ok: true, panel: transcriptPanel, opened: true,
+              progress: progressSnapshot(progress), debugLog: debugLog(), elapsedMs: now() - startedAt
+            };
           }
         }
         await sleep(pollIntervalMs);
@@ -277,10 +400,13 @@
         if (moreButton) {
           try {
             scrollIntoView(moreButton);
+            record('clicked description expand control', describeControl(moreButton));
             moreButton.click();
             progress.descriptionExpanded = true;
-          } catch {
-            // YouTube may replace a stale button while its page is hydrating.
+            transcriptButtonSearchDeadline = now() + Math.max(0, transcriptButtonTimeoutMs);
+            record('description expanded; transcript-button search window started', { searchWindowMs: transcriptButtonTimeoutMs });
+          } catch (error) {
+            record('description expand click threw', { control: describeControl(moreButton), error: String(error).slice(0, 240) });
           }
           await sleep(pollIntervalMs);
           continue;
@@ -290,27 +416,61 @@
       const transcriptSection = findTranscriptSection(document);
       if (transcriptSection) {
         progress.descriptionExpanded = true;
-        progress.transcriptSectionFound = true;
+        if (!progress.transcriptSectionFound) {
+          progress.transcriptSectionFound = true;
+          record('Transcript section found', { section: describePanel(transcriptSection, document) });
+        }
         if (!scrolledTranscriptSections.has(transcriptSection)) {
           scrollIntoView(transcriptSection);
           scrolledTranscriptSections.add(transcriptSection);
+          record('scrolled Transcript section into view', { section: describePanel(transcriptSection, document) });
         }
       }
 
       const transcriptButton = findShowTranscriptButton(document, transcriptSection);
+      const searchWindowExpired = transcriptButtonSearchDeadline !== null && now() > transcriptButtonSearchDeadline;
       if (transcriptButton) {
-        progress.transcriptButtonFound = true;
-        try {
-          scrollIntoView(transcriptButton);
-          transcriptButton.click();
-          progress.transcriptButtonClicked = true;
-        } catch {
-          // Keep polling: YouTube can replace a stale button during its delayed render.
+        if (!progress.transcriptButtonFound) {
+          progress.transcriptButtonFound = true;
+          record('Show transcript button found', describeControl(transcriptButton));
         }
-        await sleep(pollIntervalMs);
-        continue;
+        if (searchWindowExpired) {
+          record('Show transcript button appeared after the search window; not clicking it', describeControl(transcriptButton));
+        } else {
+          try {
+            scrollIntoView(transcriptButton);
+            record('clicked Show transcript control', describeControl(transcriptButton));
+            transcriptButton.click();
+            progress.transcriptButtonClicked = true;
+          } catch (error) {
+            record('Show transcript click threw; will retry', { control: describeControl(transcriptButton), error: String(error).slice(0, 240) });
+          }
+          await sleep(pollIntervalMs);
+          continue;
+        }
       }
 
+      if (transcriptButtonSearchDeadline !== null && now() >= transcriptButtonSearchDeadline && !progress.transcriptButtonClicked) {
+        const elapsed = now() - startedAt;
+        const reason = progress.transcriptButtonFound ? 'button-not-clicked' : 'button-not-found';
+        record(
+          reason === 'button-not-found'
+            ? 'Show transcript button not found before the ten-second search window ended'
+            : 'Show transcript button click did not succeed before the search window ended',
+          {
+            windowMs: transcriptButtonTimeoutMs,
+            elapsedSinceExpandMs: transcriptButtonTimeoutMs,
+            latestPageObservation: lastObservation ? JSON.parse(lastObservation) : null
+          }
+        );
+        return {
+          ok: false,
+          reason,
+          progress: progressSnapshot(progress),
+          debugLog: debugLog(),
+          elapsedMs: elapsed
+        };
+      }
       await sleep(pollIntervalMs);
     }
 
@@ -320,10 +480,14 @@
     } catch {
       ready = false;
     }
+    const reason = !ready ? 'page-not-ready' : progress.transcriptButtonClicked ? 'panel-not-loaded' : 'button-not-found';
+    record('automation stopped', { reason, elapsedMs: now() - startedAt, progress: progressSnapshot(progress) });
     return {
       ok: false,
-      reason: !ready ? 'page-not-ready' : progress.transcriptButtonClicked ? 'panel-not-loaded' : 'button-not-found',
-      progress: progressSnapshot(progress)
+      reason,
+      progress: progressSnapshot(progress),
+      debugLog: debugLog(),
+      elapsedMs: now() - startedAt
     };
   }
 

@@ -11,6 +11,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var noticeMessage: String?
+    @Published private(set) var chromeDebugLog: String?
+    @Published private(set) var didCopyChromeDebugLog = false
     @Published private(set) var history: [RecentVideo]
     @Published private(set) var preferredFormat: ExportFormat
 
@@ -42,6 +44,8 @@ final class AppModel: ObservableObject {
     func fetchTranscript() async {
         errorMessage = nil
         noticeMessage = nil
+        chromeDebugLog = nil
+        didCopyChromeDebugLog = false
         transcript = nil
         isLoading = true
         defer { isLoading = false }
@@ -54,7 +58,9 @@ final class AppModel: ObservableObject {
             } catch let directError as CaptionGrabError {
                 switch directError {
                 case .noEnglishCaptions, .videoUnavailable, .requestBlocked, .youtubeChanged:
-                    result = try await ChromeTranscriptBridge.fetch(link: link)
+                    result = try await ChromeTranscriptBridge.fetch(link: link) { [weak self] log in
+                        if let log { self?.chromeDebugLog = log }
+                    }
                 default:
                     throw directError
                 }
@@ -108,6 +114,14 @@ final class AppModel: ObservableObject {
     func clearHistory() {
         historyStore.clear()
         history = []
+    }
+
+    func copyDebugLog() {
+        guard let chromeDebugLog else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(chromeDebugLog, forType: .string)
+        didCopyChromeDebugLog = true
+        noticeMessage = "Copied the Chrome debug log. Paste it into your reply."
     }
 
     func copyAll() {

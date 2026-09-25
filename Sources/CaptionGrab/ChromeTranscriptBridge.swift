@@ -24,7 +24,11 @@ private enum ChromeTranscriptBridgeError: Error, LocalizedError {
 
 @MainActor
 enum ChromeTranscriptBridge {
-    static func fetch(link: YouTubeLink, timeout: Duration = .seconds(90)) async throws -> TranscriptData {
+    static func fetch(
+        link: YouTubeLink,
+        timeout: Duration = .seconds(90),
+        onDebugLog: @MainActor (String?) -> Void = { _ in }
+    ) async throws -> TranscriptData {
         if let problem = ChromeCompanionSetup.registrationProblem() {
             throw ChromeTranscriptBridgeError.setupRequired(problem)
         }
@@ -33,6 +37,7 @@ enum ChromeTranscriptBridge {
         }
 
         let requestID = UUID().uuidString.lowercased()
+        onDebugLog("CaptionGrab Chrome debug log\n[app] Native host setup is valid; preparing the requested Chrome video.\n")
         let inbox = ChromeCompanionConstants.transcriptInboxDirectory()
         do {
             try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
@@ -66,6 +71,7 @@ enum ChromeTranscriptBridge {
                 guard let message = try? JSONDecoder().decode(ChromeTranscriptMessage.self, from: data) else {
                     throw ChromeTranscriptBridgeError.invalidResponse
                 }
+                onDebugLog(message.debugLog)
                 do {
                     return try message.makeTranscript(
                         expectedRequestID: requestID,
