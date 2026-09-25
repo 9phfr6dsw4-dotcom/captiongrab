@@ -22,6 +22,25 @@ final class TranscriptExportTests: XCTestCase {
         )
     }
 
+    func testWordExportDeclaresModernCompatibilityAndDefaultFont() throws {
+        let data = try DocxExporter.makeDOCX(for: sample())
+        let settings = try unzipEntry("word/settings.xml", from: data)
+        let styles = try unzipEntry("word/styles.xml", from: data)
+        let relationships = try unzipEntry("word/_rels/document.xml.rels", from: data)
+        let contentTypes = try unzipEntry("[Content_Types].xml", from: data)
+
+        XCTAssertTrue(settings.contains("<w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat>"))
+        XCTAssertTrue(styles.contains("<w:docDefaults><w:rPrDefault><w:rPr>"))
+        XCTAssertTrue(styles.contains("w:ascii=\"Times New Roman\""))
+        XCTAssertTrue(styles.contains("w:hAnsi=\"Times New Roman\""))
+        XCTAssertTrue(styles.contains("<w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>"))
+        XCTAssertTrue(styles.contains("<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\">"))
+        XCTAssertTrue(relationships.contains("Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\""))
+        XCTAssertTrue(relationships.contains("Id=\"rId4\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\""))
+        XCTAssertTrue(contentTypes.contains("PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\""))
+        XCTAssertTrue(contentTypes.contains("PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\""))
+    }
+
     func testCopyAllMarkdownRemainsUnchanged() {
         XCTAssertEqual(
             TranscriptFormatter.markdown(for: sample()),
