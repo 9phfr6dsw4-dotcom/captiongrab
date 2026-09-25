@@ -54,11 +54,11 @@ def main() -> int:
         Path.home()
         / "Library"
         / "Application Support"
-        / "Google"
-        / "Chrome"
         / "CaptionGrab"
         / "ChromeInbox"
     )
+    inbox_existed = inbox.exists()
+    support_existed = inbox.parent.exists()
     result_file = inbox / f"{request_id}.json"
     try:
         stored_message = json.loads(result_file.read_bytes())
@@ -66,9 +66,14 @@ def main() -> int:
             raise RuntimeError("Native host did not persist the expected synthetic transcript.")
     finally:
         result_file.unlink(missing_ok=True)
-        for directory in (inbox, inbox.parent, inbox.parent.parent):
+        if not inbox_existed:
             try:
-                directory.rmdir()
+                inbox.rmdir()
+            except OSError:
+                pass
+        if not support_existed:
+            try:
+                inbox.parent.rmdir()
             except OSError:
                 pass
     print("Native Messaging host frame, origin, validation, and local inbox test passed.")

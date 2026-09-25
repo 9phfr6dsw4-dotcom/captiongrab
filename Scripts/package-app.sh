@@ -13,11 +13,6 @@ MACOSX_DEPLOYMENT_TARGET=26.0 swift build -c release --product CaptionGrabNative
 install -m 755 .build/release/CaptionGrab "$APP/Contents/MacOS/CaptionGrab"
 install -m 755 .build/release/CaptionGrabNativeHost "$APP/Contents/MacOS/CaptionGrabNativeHost"
 cp -R ChromeExtension/. "$APP/Contents/Resources/ChromeExtension/"
-if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
-  python3 Scripts/test-native-host.py "$APP/Contents/MacOS/CaptionGrabNativeHost"
-else
-  printf 'Skipping Native Messaging host execution outside isolated CI.\n'
-fi
 test -x "$APP/Contents/MacOS/CaptionGrabNativeHost"
 test -f "$APP/Contents/Resources/ChromeExtension/manifest.json"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
@@ -27,11 +22,19 @@ rm -rf "$APP/Contents/Resources/CaptionGrab.iconset"
 
 plutil -lint "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" | grep -Fx '26.0'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx '1.1.1'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" | grep -Fx '3'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx '1.2.0'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" | grep -Fx '4'
 codesign --force --sign - "$APP/Contents/MacOS/CaptionGrabNativeHost"
-codesign --force --sign - --entitlements Resources/CaptionGrab.entitlements "$APP"
+codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
+codesign --verify --strict "$APP/Contents/MacOS/CaptionGrabNativeHost"
+python3 Scripts/test-unsandboxed-app.py "$APP/Contents/MacOS/CaptionGrabNativeHost"
+python3 Scripts/test-unsandboxed-app.py "$APP"
+if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+  python3 Scripts/test-native-host.py "$APP/Contents/MacOS/CaptionGrabNativeHost"
+else
+  printf 'Skipping Native Messaging host execution outside isolated CI.\n'
+fi
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 ditto -x -k "$ZIP" "$EXTRACTED"
 EXTRACTED_APP="$EXTRACTED/CaptionGrab.app"
@@ -42,6 +45,8 @@ diff -qr ChromeExtension "$EXTRACTED_APP/Contents/Resources/ChromeExtension"
 plutil -lint "$EXTRACTED_APP/Contents/Info.plist"
 codesign --verify --deep --strict "$EXTRACTED_APP"
 codesign --verify --strict "$EXTRACTED_APP/Contents/MacOS/CaptionGrabNativeHost"
+python3 Scripts/test-unsandboxed-app.py "$EXTRACTED_APP/Contents/MacOS/CaptionGrabNativeHost"
+python3 Scripts/test-unsandboxed-app.py "$EXTRACTED_APP"
 unzip -t "$ZIP"
 HASH="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 printf '%s  CaptionGrab.zip\n' "$HASH" > "$ZIP.sha256"

@@ -17,16 +17,17 @@ CaptionGrab preserves the caption events and text supplied by YouTube, including
 
 ## Download
 
-Download the latest `CaptionGrab.zip` from [GitHub Releases](https://github.com/9phfr6dsw4-dotcom/captiongrab/releases/latest). The app is ad-hoc signed and not notarized; macOS may require Control-click → **Open** the first time.
+Download the latest [`CaptionGrab.zip`](https://github.com/9phfr6dsw4-dotcom/captiongrab/releases/latest) from GitHub Releases. Requires macOS 26 or later. The app is not App Sandbox-signed; its ad-hoc signature is not notarized, so the first launch may require Control-click → **Open**.
 
-| Feature | Setup |
-| --- | --- |
-| Chrome fallback | Open CaptionGrab and click **Set up Chrome extension**. Approve the folder prompt for `Library/Application Support/Google/Chrome`. In Chrome's extensions page, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder shown in Finder. |
-| Automatic capture | Click **Get transcript** as usual. When direct retrieval is blocked, CaptionGrab opens the matching YouTube page in Chrome, reads the English transcript panel, and imports it locally. |
-| Stable extension ID | The unpacked extension's `manifest.json` contains its public `key`; its ID remains `kajphiodjnkmgeidbcndikaaegghiffi` if you move the extension folder. |
-| Local-only bridge | The extension needs only YouTube page access and `nativeMessaging`. It reads transcript text from the displayed page and sends it to a local helper; it does not request cookie access. Captured data stays in a CaptionGrab subfolder of Chrome's local profile. |
+## Chrome transcript fallback
 
-Keep CaptionGrab in its installed location after setup. If you move the app itself, click **Set up Chrome extension** again so Chrome's local helper registration can be refreshed. You can move the extension folder without changing the extension ID.
+1. Open CaptionGrab and choose **Set up Chrome extension**. No folder picker or folder-access bookmark is needed.
+2. CaptionGrab registers its Native Messaging host at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.captiongrab.host.json` and creates its transcript inbox at `~/Library/Application Support/CaptionGrab/ChromeInbox`.
+3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder revealed by CaptionGrab.
+4. Click **Get transcript** as usual. When direct retrieval is blocked, CaptionGrab opens the matching video in Chrome and reads its English transcript panel.
+5. If setup fails, the app displays the failing operation, exact path, operating-system error domain/code, and underlying error text. The error text is selectable so it can be copied.
+
+On launch, CaptionGrab removes the old `CaptionGrab.chromeNativeMessagingFolderBookmark` preference left by older versions. This does not clear other settings, such as your chosen export folder. The Chrome Native Messaging manifest is installed under Chrome's Application Support folder; transcript messages are stored in CaptionGrab's normal Application Support folder. The extension reads transcript text shown on YouTube and does not request cookie access. Its fixed ID remains `kajphiodjnkmgeidbcndikaaegghiffi` if the extension folder is moved. Keep CaptionGrab in its installed location after setup; if you move the app itself, click **Set up Chrome extension** again to refresh the host path.
 
 ## Build and test
 

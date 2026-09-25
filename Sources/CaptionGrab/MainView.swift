@@ -73,6 +73,7 @@ struct MainView: View {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
                 .accessibilityAddTraits(.isSummaryElement)
         } else if let notice = model.noticeMessage {
             Label(notice, systemImage: "checkmark.circle.fill")

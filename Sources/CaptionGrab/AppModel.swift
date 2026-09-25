@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     private let formatKey = "CaptionGrab.lastExportFormat"
 
     init() {
+        ChromeCompanionConstants.clearLegacyChromeFolderBookmark(from: UserDefaults.standard)
         history = historyStore.load()
         preferredFormat = ExportFormat(rawValue: UserDefaults.standard.string(forKey: "CaptionGrab.lastExportFormat") ?? "") ?? .markdown
     }
@@ -67,13 +68,16 @@ final class AppModel: ObservableObject {
         errorMessage = nil
         noticeMessage = nil
         do {
-            guard let extensionURL = try ChromeCompanionSetup.install() else { return }
+            let extensionURL = try ChromeCompanionSetup.install()
             NSWorkspace.shared.activateFileViewerSelecting([extensionURL])
             if let chromeURL = URL(string: "chrome://extensions"),
                let chromeApp = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") {
                 NSWorkspace.shared.open([chromeURL], withApplicationAt: chromeApp, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
             }
-            noticeMessage = "Native helper registered. In Chrome, turn on Developer mode → Load unpacked, then choose the CaptionGrab extension folder shown in Finder. Its fixed ID stays the same if you move that folder."
+            let registrationPath = ChromeCompanionConstants.chromeNativeMessagingDirectory()
+                .appendingPathComponent(ChromeCompanionConstants.nativeHostManifestFileName).path
+            let inboxPath = ChromeCompanionConstants.transcriptInboxDirectory().path
+            noticeMessage = "Chrome helper installed. No folder selection is needed. Load the CaptionGrab extension folder shown in Finder at chrome://extensions.\nNative Messaging manifest: \(registrationPath)\nTranscript storage: \(inboxPath)"
         } catch {
             errorMessage = error.localizedDescription
         }

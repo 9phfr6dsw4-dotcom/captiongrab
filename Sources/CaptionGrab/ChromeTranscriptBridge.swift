@@ -3,17 +3,17 @@ import CaptionGrabCore
 import Foundation
 
 private enum ChromeTranscriptBridgeError: Error, LocalizedError {
-    case setupRequired
+    case setupRequired(String)
     case chromeMissing
     case timedOut
     case invalidResponse
 
     var errorDescription: String? {
         switch self {
-        case .setupRequired:
-            "YouTube blocked direct access. Set up the Chrome extension, load its unpacked folder in Chrome, then try again."
+        case let .setupRequired(details):
+            "Chrome helper setup is incomplete.\n\n\(details)"
         case .chromeMissing:
-            "Google Chrome is not installed. Install Chrome or use a YouTube link CaptionGrab can fetch directly."
+            "Google Chrome is not installed. Install Chrome, then try again."
         case .timedOut:
             "CaptionGrab didn't receive a transcript from Chrome. At chrome://extensions, confirm the extension is loaded, Developer mode is on, and the extension can access youtube.com."
         case .invalidResponse:
@@ -25,19 +25,20 @@ private enum ChromeTranscriptBridgeError: Error, LocalizedError {
 @MainActor
 enum ChromeTranscriptBridge {
     static func fetch(link: YouTubeLink, timeout: Duration = .seconds(90)) async throws -> TranscriptData {
-        guard let chromeRoot = ChromeCompanionSetup.savedChromeRoot(),
-              chromeRoot.startAccessingSecurityScopedResource() else {
-            throw ChromeTranscriptBridgeError.setupRequired
+        if let problem = ChromeCompanionSetup.registrationProblem() {
+            throw ChromeTranscriptBridgeError.setupRequired(problem)
         }
-        defer { chromeRoot.stopAccessingSecurityScopedResource() }
-        guard ChromeCompanionSetup.isRegistered() else { throw ChromeTranscriptBridgeError.setupRequired }
         guard let chromeURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") else {
             throw ChromeTranscriptBridgeError.chromeMissing
         }
 
         let requestID = UUID().uuidString.lowercased()
-        let inbox = ChromeCompanionConstants.inboxDirectory(chromeRootURL: chromeRoot)
-        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let inbox = ChromeCompanionConstants.transcriptInboxDirectory()
+        do {
+            try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        } catch {
+            throw FileSystemDiagnostic(operation: "Create CaptionGrab transcript inbox", path: inbox.path, underlyingError: error)
+        }
         let resultURL = inbox.appendingPathComponent("\(requestID).json")
         try? FileManager.default.removeItem(at: resultURL)
 

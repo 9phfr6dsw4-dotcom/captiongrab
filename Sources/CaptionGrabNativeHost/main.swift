@@ -5,14 +5,12 @@ private enum NativeHostFailure: Error, LocalizedError {
     case malformedFrame
     case unauthorizedExtension
     case invalidRequest
-    case invalidStorageLocation
 
     var errorDescription: String? {
         switch self {
         case .malformedFrame: "The Chrome extension sent an invalid message."
         case .unauthorizedExtension: "The request did not come from the CaptionGrab extension."
         case .invalidRequest: "The Chrome extension sent an invalid transcript response."
-        case .invalidStorageLocation: "The Chrome helper is not configured for CaptionGrab's local inbox."
         }
     }
 }
@@ -49,11 +47,8 @@ func writeResponse(_ object: [String: Any]) {
     try? FileHandle.standardOutput.write(contentsOf: frame(body))
 }
 
-func requestDataDirectory() throws -> URL {
-    guard let inbox = ChromeCompanionConstants.inboxDirectory() else {
-        throw NativeHostFailure.invalidStorageLocation
-    }
-    return inbox
+func requestDataDirectory() -> URL {
+    ChromeCompanionConstants.transcriptInboxDirectory()
 }
 
 func validate(_ message: ChromeTranscriptMessage) throws -> UUID {
@@ -85,7 +80,7 @@ func runNativeHost() throws {
     let allowedOrigin = "chrome-extension://\(ChromeCompanionConstants.extensionID)/"
     guard arguments.contains(allowedOrigin) else { throw NativeHostFailure.unauthorizedExtension }
 
-    let directory = try requestDataDirectory()
+    let directory = requestDataDirectory()
     let size = Int(readLittleEndianUInt32(try readExactly(4)))
     guard size > 0, size <= maximumMessageBytes else { throw NativeHostFailure.malformedFrame }
     let body = try readExactly(size)

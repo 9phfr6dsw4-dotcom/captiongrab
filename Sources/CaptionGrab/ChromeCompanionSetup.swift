@@ -10,138 +10,114 @@ private struct ChromeNativeMessagingManifest: Codable {
     let allowed_origins: [String]
 }
 
-private enum ChromeCompanionSetupError: Error, LocalizedError {
-    case chromeNotInstalled
-    case userHomeUnavailable
-    case nativeHostMissing
-    case extensionAssetsMissing
-    case wrongChromeFolder
-    case nativeHostRegistrationConflict
-    case registrationWriteFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .chromeNotInstalled:
-            "Google Chrome is not installed. Install Chrome, then try the setup again."
-        case .userHomeUnavailable:
-            "CaptionGrab couldn't locate your Mac account's home folder. Restart the app and try again."
-        case .nativeHostMissing:
-            "CaptionGrab's Chrome helper is missing. Reinstall CaptionGrab from its ZIP, then try again."
-        case .extensionAssetsMissing:
-            "CaptionGrab's Chrome extension files are missing. Reinstall CaptionGrab from its ZIP."
-        case .wrongChromeFolder:
-            "Select the Google Chrome folder at Library/Application Support/Google/Chrome."
-        case .nativeHostRegistrationConflict:
-            "A different program already uses CaptionGrab's Chrome helper name. Its registration was left unchanged."
-        case .registrationWriteFailed:
-            "CaptionGrab couldn't register its local Chrome helper. Check the selected Chrome folder's access and try again."
-        }
-    }
-}
-
 enum ChromeCompanionSetup {
-    private static var expectedChromeRoot: URL? {
-        guard let chromeRoot = ChromeCompanionConstants.chromeProfileDirectory() else { return nil }
-        return ChromeCompanionConstants.canonicalFileURL(chromeRoot)
-    }
-
-    static func savedChromeRoot() -> URL? {
-        guard let expectedChromeRoot,
-              let data = UserDefaults.standard.data(forKey: ChromeCompanionConstants.chromeFolderBookmarkKey) else { return nil }
-        var stale = false
-        guard let folder = try? URL(
-            resolvingBookmarkData: data,
-            options: [.withSecurityScope, .withoutUI],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ), !stale,
-           ChromeCompanionConstants.canonicalFileURL(folder) == expectedChromeRoot else { return nil }
-        return folder
-    }
+    private static let fileManager = FileManager.default
 
     static func isRegistered(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
-        guard let chromeRoot = savedChromeRoot() else { return false }
-        guard chromeRoot.startAccessingSecurityScopedResource() else { return false }
-        defer { chromeRoot.stopAccessingSecurityScopedResource() }
+        registrationProblem(bundleURL: bundleURL) == nil
+    }
 
-        let expectedHost = ChromeCompanionConstants.nativeHostExecutable(bundleURL: bundleURL.resolvingSymlinksInPath()).standardizedFileURL.path
-        let manifestURL = ChromeCompanionConstants.chromeNativeMessagingDirectory(chromeRootURL: chromeRoot)
+    static func registrationProblem(bundleURL: URL = Bundle.main.bundleURL) -> String? {
+        let appURL = bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        let hostURL = ChromeCompanionConstants.nativeHostExecutable(bundleURL: appURL)
+        let extensionManifestURL = ChromeCompanionConstants.extensionDirectory(bundleURL: appURL)
+            .appendingPathComponent("manifest.json")
+        let registrationURL = ChromeCompanionConstants.chromeNativeMessagingDirectory()
             .appendingPathComponent(ChromeCompanionConstants.nativeHostManifestFileName)
-        guard FileManager.default.isExecutableFile(atPath: expectedHost),
-              FileManager.default.fileExists(atPath: ChromeCompanionConstants.extensionDirectory(bundleURL: bundleURL).appendingPathComponent("manifest.json").path),
-              let data = try? Data(contentsOf: manifestURL),
-              let manifest = try? JSONDecoder().decode(ChromeNativeMessagingManifest.self, from: data) else { return false }
-        return manifest.name == ChromeCompanionConstants.nativeHostName &&
-            manifest.path == expectedHost &&
-            manifest.type == "stdio" &&
-            manifest.allowed_origins == ["chrome-extension://\(ChromeCompanionConstants.extensionID)/"]
+        let allowedOrigin = "chrome-extension://\(ChromeCompanionConstants.extensionID)/"
+
+        guard fileManager.isExecutableFile(atPath: hostURL.path) else {
+            return missingFileDiagnostic("Check CaptionGrab's Native Messaging executable", at: hostURL).localizedDescription
+        }
+        guard fileManager.fileExists(atPath: extensionManifestURL.path) else {
+            return missingFileDiagnostic("Check CaptionGrab's Chrome extension files", at: extensionManifestURL).localizedDescription
+        }
+        guard fileManager.fileExists(atPath: registrationURL.path) else {
+            return missingFileDiagnostic("Check Chrome's Native Messaging registration", at: registrationURL).localizedDescription
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: registrationURL)
+        } catch {
+            return FileSystemDiagnostic(operation: "Read Chrome's Native Messaging registration", path: registrationURL.path, underlyingError: error).localizedDescription
+        }
+        let manifest: ChromeNativeMessagingManifest
+        do {
+            manifest = try JSONDecoder().decode(ChromeNativeMessagingManifest.self, from: data)
+        } catch {
+            return FileSystemDiagnostic(operation: "Parse Chrome's Native Messaging registration", path: registrationURL.path, underlyingError: error).localizedDescription
+        }
+
+        guard manifest.name == ChromeCompanionConstants.nativeHostName,
+              manifest.path == hostURL.path,
+              manifest.type == "stdio",
+              manifest.allowed_origins == [allowedOrigin] else {
+            return diagnostic(
+                "Validate Chrome's Native Messaging registration",
+                at: registrationURL,
+                description: "The registration does not point to this CaptionGrab installation and its fixed Chrome extension ID.",
+                reason: "Expected host path: \(hostURL.path)\nActual host path: \(manifest.path)\nExpected extension origin: \(allowedOrigin)\nActual extension origins: \(manifest.allowed_origins.joined(separator: ", "))"
+            ).localizedDescription
+        }
+        return nil
     }
 
     @MainActor
-    static func install() throws -> URL? {
+    static func install() throws -> URL {
+        ChromeCompanionConstants.clearLegacyChromeFolderBookmark()
+
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil else {
-            throw ChromeCompanionSetupError.chromeNotInstalled
+            throw diagnostic(
+                "Locate Google Chrome",
+                path: "Launch Services bundle identifier com.google.Chrome",
+                description: "Google Chrome is not installed or could not be located."
+            )
         }
-        guard let accountHome = ChromeCompanionConstants.currentUserHomeDirectory(),
-              let expectedChromeDirectory = ChromeCompanionConstants.chromeProfileDirectory(homeURL: accountHome) else {
-            throw ChromeCompanionSetupError.userHomeUnavailable
-        }
-        let expectedChromeRoot = ChromeCompanionConstants.canonicalFileURL(expectedChromeDirectory)
+
         let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
         let hostURL = ChromeCompanionConstants.nativeHostExecutable(bundleURL: appURL)
         let extensionURL = ChromeCompanionConstants.extensionDirectory(bundleURL: appURL)
-        guard FileManager.default.isExecutableFile(atPath: hostURL.path) else {
-            throw ChromeCompanionSetupError.nativeHostMissing
+        let extensionManifestURL = extensionURL.appendingPathComponent("manifest.json")
+        guard fileManager.isExecutableFile(atPath: hostURL.path) else {
+            throw missingFileDiagnostic("Check CaptionGrab's Native Messaging executable", at: hostURL)
         }
-        guard FileManager.default.fileExists(atPath: extensionURL.appendingPathComponent("manifest.json").path) else {
-            throw ChromeCompanionSetupError.extensionAssetsMissing
-        }
-
-        var scopedURLToStop: URL?
-        defer { scopedURLToStop?.stopAccessingSecurityScopedResource() }
-
-        let chromeRoot: URL
-        if let saved = savedChromeRoot(), saved.startAccessingSecurityScopedResource() {
-            chromeRoot = saved
-            scopedURLToStop = saved
-        } else {
-            UserDefaults.standard.removeObject(forKey: ChromeCompanionConstants.chromeFolderBookmarkKey)
-            let panel = NSOpenPanel()
-            panel.title = "Allow CaptionGrab to connect to Chrome"
-            panel.message = "Select the Google Chrome folder inside Library/Application Support/Google/Chrome. CaptionGrab will add its Native Messaging helper there."
-            panel.prompt = "Select Chrome Folder"
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.allowsMultipleSelection = false
-            panel.directoryURL = expectedChromeRoot
-            guard panel.runModal() == .OK, let selected = panel.url else { return nil }
-            scopedURLToStop = selected
-            guard ChromeCompanionConstants.isChromeProfileDirectory(
-                selectedURL: selected,
-                homeURL: accountHome
-            ) else {
-                throw ChromeCompanionSetupError.wrongChromeFolder
-            }
-            chromeRoot = selected
+        guard fileManager.fileExists(atPath: extensionManifestURL.path) else {
+            throw missingFileDiagnostic("Check CaptionGrab's Chrome extension files", at: extensionManifestURL)
         }
 
-        let chromeDirectory = ChromeCompanionConstants.chromeNativeMessagingDirectory(chromeRootURL: chromeRoot)
+        let chromeDirectory = ChromeCompanionConstants.chromeNativeMessagingDirectory()
         let registrationURL = chromeDirectory.appendingPathComponent(ChromeCompanionConstants.nativeHostManifestFileName)
+        let inboxDirectory = ChromeCompanionConstants.transcriptInboxDirectory()
         let allowedOrigin = "chrome-extension://\(ChromeCompanionConstants.extensionID)/"
         let description = "Receives the transcript from CaptionGrab's YouTube-only Chrome extension."
-        if FileManager.default.fileExists(atPath: registrationURL.path) {
-            guard let existingData = try? Data(contentsOf: registrationURL),
-                  let existing = try? JSONDecoder().decode(ChromeNativeMessagingManifest.self, from: existingData),
-                  existing.name == ChromeCompanionConstants.nativeHostName,
-                  existing.description == description,
+
+        if fileManager.fileExists(atPath: registrationURL.path) {
+            let existingData: Data
+            do {
+                existingData = try Data(contentsOf: registrationURL)
+            } catch {
+                throw FileSystemDiagnostic(operation: "Read existing Chrome Native Messaging registration", path: registrationURL.path, underlyingError: error)
+            }
+            let existing: ChromeNativeMessagingManifest
+            do {
+                existing = try JSONDecoder().decode(ChromeNativeMessagingManifest.self, from: existingData)
+            } catch {
+                throw FileSystemDiagnostic(operation: "Parse existing Chrome Native Messaging registration", path: registrationURL.path, underlyingError: error)
+            }
+            guard existing.name == ChromeCompanionConstants.nativeHostName,
                   existing.type == "stdio",
                   existing.allowed_origins == [allowedOrigin],
                   URL(fileURLWithPath: existing.path).lastPathComponent == "CaptionGrabNativeHost" else {
-                throw ChromeCompanionSetupError.nativeHostRegistrationConflict
+                throw diagnostic(
+                    "Validate existing Chrome Native Messaging registration",
+                    at: registrationURL,
+                    description: "A different program already uses CaptionGrab's Native Messaging host name. The existing registration was left unchanged.",
+                    reason: "Existing host path: \(existing.path)\nExpected host name: \(ChromeCompanionConstants.nativeHostName)\nExpected extension origin: \(allowedOrigin)"
+                )
             }
         }
 
-        let inbox = ChromeCompanionConstants.inboxDirectory(chromeRootURL: chromeRoot)
         let manifest = ChromeNativeMessagingManifest(
             name: ChromeCompanionConstants.nativeHostName,
             description: description,
@@ -149,22 +125,71 @@ enum ChromeCompanionSetup {
             type: "stdio",
             allowed_origins: [allowedOrigin]
         )
-
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let manifestData: Data
         do {
-            try FileManager.default.createDirectory(at: chromeDirectory, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let bookmark = try chromeRoot.bookmarkData(
-                options: [.withSecurityScope],
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-            try encoder.encode(manifest).write(to: registrationURL, options: .atomic)
-            UserDefaults.standard.set(bookmark, forKey: ChromeCompanionConstants.chromeFolderBookmarkKey)
+            manifestData = try encoder.encode(manifest)
         } catch {
-            throw ChromeCompanionSetupError.registrationWriteFailed
+            throw FileSystemDiagnostic(operation: "Encode Chrome Native Messaging registration", path: registrationURL.path, underlyingError: error)
         }
+
+        try performFileOperation("Create Chrome Native Messaging directory", at: chromeDirectory) {
+            try fileManager.createDirectory(at: chromeDirectory, withIntermediateDirectories: true)
+        }
+        try performFileOperation("Create CaptionGrab transcript storage directory", at: inboxDirectory) {
+            try fileManager.createDirectory(at: inboxDirectory, withIntermediateDirectories: true)
+        }
+        try performFileOperation("Write Chrome Native Messaging registration", at: registrationURL) {
+            try manifestData.write(to: registrationURL, options: .atomic)
+        }
+
+        ChromeCompanionConstants.clearLegacyChromeFolderBookmark()
         return extensionURL
+    }
+
+    private static func performFileOperation<T>(_ operation: String, at url: URL, body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch {
+            throw FileSystemDiagnostic(operation: operation, path: url.path, underlyingError: error)
+        }
+    }
+
+    private static func missingFileDiagnostic(_ operation: String, at url: URL) -> FileSystemDiagnostic {
+        diagnostic(
+            operation,
+            at: url,
+            description: "The required file does not exist or is not accessible.",
+            domain: NSCocoaErrorDomain,
+            code: NSFileReadNoSuchFileError,
+            reason: "Check that CaptionGrab is installed completely and that this path is readable."
+        )
+    }
+
+    private static func diagnostic(
+        _ operation: String,
+        at url: URL,
+        description: String,
+        domain: String = "CaptionGrab.ChromeSetup",
+        code: Int = 1,
+        reason: String? = nil
+    ) -> FileSystemDiagnostic {
+        diagnostic(operation, path: url.path, description: description, domain: domain, code: code, reason: reason)
+    }
+
+    private static func diagnostic(
+        _ operation: String,
+        path: String,
+        description: String,
+        domain: String = "CaptionGrab.ChromeSetup",
+        code: Int = 1,
+        reason: String? = nil
+    ) -> FileSystemDiagnostic {
+        var userInfo: [String: Any] = [NSLocalizedDescriptionKey: description]
+        if let reason { userInfo[NSLocalizedFailureReasonErrorKey] = reason }
+        userInfo[NSFilePathErrorKey] = path
+        let underlying = NSError(domain: domain, code: code, userInfo: userInfo)
+        return FileSystemDiagnostic(operation: operation, path: path, underlyingError: underlying)
     }
 }
