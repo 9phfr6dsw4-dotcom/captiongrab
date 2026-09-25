@@ -70,11 +70,19 @@ struct MainView: View {
     @ViewBuilder
     private var feedback: some View {
         if let error = model.errorMessage {
-            Label(error, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .accessibilityAddTraits(.isSummaryElement)
+            VStack(alignment: .leading, spacing: 10) {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .accessibilityAddTraits(.isSummaryElement)
+                if model.shouldShowAppTranslocationRecovery {
+                    HStack {
+                        Button("Open Applications in Finder", action: model.openApplicationsFolder)
+                        Button("Quit CaptionGrab", action: model.quitCaptionGrab)
+                    }
+                }
+            }
         } else if let notice = model.noticeMessage {
             Label(notice, systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)

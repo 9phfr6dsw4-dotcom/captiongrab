@@ -21,9 +21,9 @@ Download the latest [`CaptionGrab.zip`](https://github.com/9phfr6dsw4-dotcom/cap
 
 ## Chrome transcript fallback
 
-1. Open CaptionGrab and choose **Set up Chrome extension**. No folder picker or folder-access bookmark is needed.
-2. CaptionGrab registers its Native Messaging host at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.captiongrab.host.json` and creates its transcript inbox at `~/Library/Application Support/CaptionGrab/ChromeInbox`.
-3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder revealed by CaptionGrab.
+1. Download the latest `CaptionGrab.zip`, replace `CaptionGrab.app` in Applications, and open it from Applications. The Chrome helper setup now detects when macOS launched a temporary App Translocation copy and asks Launch Services for a matching, complete, non-translocated installed copy. It registers the Native Messaging helper and reveals the extension folder from that stable copy—not the temporary path.
+2. Choose **Set up Chrome extension**. If CaptionGrab cannot find a valid installed copy, it shows Finder-only recovery steps with **Open Applications in Finder** and **Quit CaptionGrab** buttons. Quit, double-click CaptionGrab from Applications, and run setup again. If it is not there, use Finder to move CaptionGrab.app into Applications first; no Terminal commands are needed.
+3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder revealed by CaptionGrab. If Chrome still shows an extension loaded from the old temporary location, remove that stale entry and load the folder from the installed app.
 4. Click **Get transcript** as usual. When direct retrieval is blocked, CaptionGrab opens the matching video in Chrome, expands the description, opens the transcript panel, selects the Transcript tab, and reads the loaded English captions.
 5. After installing a CaptionGrab update that changes the extension, open `chrome://extensions` and click **Reload** on the CaptionGrab unpacked extension. You do not need to remove and re-add it; its extension ID stays the same.
 6. If automatic panel opening fails, CaptionGrab displays a message telling you to expand “…more” if shown, scroll to and click **Show transcript**, click the **Transcript** tab if the **In this video** panel opens on Chapters, wait for transcript lines, and retry. Other setup failures show the exact operation, path, OS error domain/code, and underlying error text.

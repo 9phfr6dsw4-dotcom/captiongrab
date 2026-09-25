@@ -11,13 +11,20 @@ private struct ChromeNativeMessagingManifest: Codable {
 }
 
 enum ChromeCompanionSetup {
+    @MainActor
     static func isRegistered(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
         registrationProblem(bundleURL: bundleURL) == nil
     }
 
+    @MainActor
     static func registrationProblem(bundleURL: URL = Bundle.main.bundleURL) -> String? {
         let fileManager = FileManager.default
-        let appURL = bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        let appURL: URL
+        do {
+            appURL = try resolvedInstallationBundleURL(runningBundleURL: bundleURL)
+        } catch {
+            return error.localizedDescription
+        }
         let hostURL = ChromeCompanionConstants.nativeHostExecutable(bundleURL: appURL)
         let extensionManifestURL = ChromeCompanionConstants.extensionDirectory(bundleURL: appURL)
             .appendingPathComponent("manifest.json")
@@ -75,7 +82,7 @@ enum ChromeCompanionSetup {
             )
         }
 
-        let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        let appURL = try resolvedInstallationBundleURL(runningBundleURL: Bundle.main.bundleURL)
         let hostURL = ChromeCompanionConstants.nativeHostExecutable(bundleURL: appURL)
         let extensionURL = ChromeCompanionConstants.extensionDirectory(bundleURL: appURL)
         let extensionManifestURL = extensionURL.appendingPathComponent("manifest.json")
@@ -146,6 +153,50 @@ enum ChromeCompanionSetup {
 
         ChromeCompanionConstants.clearLegacyChromeFolderBookmark()
         return extensionURL
+    }
+
+    @MainActor
+    private static func resolvedInstallationBundleURL(runningBundleURL: URL) throws -> URL {
+        let runningURL = runningBundleURL.standardizedFileURL
+        guard CaptionGrabInstallationLocator.isAppTranslocated(bundleURL: runningURL) else {
+            return runningURL.resolvingSymlinksInPath().standardizedFileURL
+        }
+
+        let runningBundle = Bundle(url: runningURL) ?? Bundle.main
+        guard let bundleIdentifier = runningBundle.bundleIdentifier,
+              let shortVersion = runningBundle.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let buildVersion = runningBundle.infoDictionary?["CFBundleVersion"] as? String,
+              let installedURL = CaptionGrabInstallationLocator.resolvedBundleURL(
+                runningBundleURL: runningURL,
+                registeredBundleURLs: [
+                    URL(fileURLWithPath: "/Applications/CaptionGrab.app", isDirectory: true),
+                    FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Applications/CaptionGrab.app", isDirectory: true)
+                ] + NSWorkspace.shared.urlsForApplications(withBundleIdentifier: bundleIdentifier),
+                expectedBundleIdentifier: bundleIdentifier,
+                expectedShortVersion: shortVersion,
+                expectedBuildVersion: buildVersion
+              ) else {
+            throw translocationRecoveryDiagnostic(runningURL: runningURL)
+        }
+        return installedURL
+    }
+
+    private static func translocationRecoveryDiagnostic(runningURL: URL) -> FileSystemDiagnostic {
+        let underlying = NSError(
+            domain: "CaptionGrab.AppTranslocation",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey: "CaptionGrab is running from a temporary macOS App Translocation copy.",
+                NSLocalizedFailureReasonErrorKey: "Chrome needs the Native Messaging helper at a stable installed path. No matching, complete, non-translocated CaptionGrab copy was found.",
+                NSLocalizedRecoverySuggestionErrorKey: "Without Terminal: quit CaptionGrab, open Applications in Finder, and double-click CaptionGrab there. If it is not in Applications, drag CaptionGrab.app there in Finder first. Then choose Set up Chrome extension again."
+            ]
+        )
+        return FileSystemDiagnostic(
+            operation: "Resolve CaptionGrab's permanent installed location",
+            path: runningURL.path,
+            underlyingError: underlying
+        )
     }
 
     private static func performFileOperation<T>(_ operation: String, at url: URL, body: () throws -> T) throws -> T {

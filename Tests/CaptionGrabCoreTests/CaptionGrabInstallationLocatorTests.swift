@@ -60,12 +60,14 @@ final class CaptionGrabInstallationLocatorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
         let wrongIdentifierURL = temporaryDirectory.appendingPathComponent("Wrong.app", isDirectory: true)
         let missingHostURL = temporaryDirectory.appendingPathComponent("Incomplete.app", isDirectory: true)
+        let missingExtensionURL = temporaryDirectory.appendingPathComponent("NoExtension.app", isDirectory: true)
         try makeAppBundle(at: wrongIdentifierURL, bundleIdentifier: "com.example.other")
         try makeAppBundle(at: missingHostURL, includeNativeHost: false)
+        try makeAppBundle(at: missingExtensionURL, includeExtension: false)
 
         let resolved = CaptionGrabInstallationLocator.resolvedBundleURL(
             runningBundleURL: URL(fileURLWithPath: "/var/folders/ab/AppTranslocation/1234/d/CaptionGrab.app"),
-            registeredBundleURLs: [wrongIdentifierURL, missingHostURL],
+            registeredBundleURLs: [wrongIdentifierURL, missingHostURL, missingExtensionURL],
             expectedBundleIdentifier: bundleIdentifier,
             expectedShortVersion: shortVersion,
             expectedBuildVersion: buildVersion
