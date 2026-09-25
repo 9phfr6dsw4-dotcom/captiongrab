@@ -89,7 +89,8 @@ final class TranscriptExportTests: XCTestCase {
         try data.write(to: temporaryURL)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-p", temporaryURL.path, name]
+        let entryPattern = name == "[Content_Types].xml" ? "[[]Content_Types].xml" : name
+        process.arguments = ["-p", temporaryURL.path, entryPattern]
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()
