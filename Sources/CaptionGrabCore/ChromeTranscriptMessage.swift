@@ -77,8 +77,8 @@ public struct ChromeTranscriptMessage: Codable, Equatable, Sendable {
             throw ChromeTranscriptMessageError.invalidMessage("Chrome returned an unsupported or mismatched response.")
         }
         guard let language = captionLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              language == "english" || language == "en" else {
-            throw ChromeTranscriptMessageError.invalidMessage("Chrome did not confirm that the transcript is English.")
+              language == "english" || language == "en" || language == "as-displayed" else {
+            throw ChromeTranscriptMessageError.invalidMessage("Chrome returned an unsupported transcript language marker.")
         }
         guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
               !title.isEmpty, title.count <= 500,
