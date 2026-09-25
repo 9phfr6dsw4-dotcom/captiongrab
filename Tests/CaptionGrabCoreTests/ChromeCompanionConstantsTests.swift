@@ -1,62 +1,59 @@
+import Foundation
 import XCTest
 @testable import CaptionGrabCore
 
 final class ChromeCompanionConstantsTests: XCTestCase {
-    func testTranscriptInboxSharesTheUserGrantedChromeProfileFolder() throws {
+    func testNativeMessagingManifestUsesChromeInstallationDirectoryWithoutFolderSelection() {
         let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
-        let inbox = try XCTUnwrap(ChromeCompanionConstants.inboxDirectory(homeURL: home))
         XCTAssertEqual(
-            inbox.path,
-            "/Users/example/Library/Application Support/Google/Chrome/CaptionGrab/ChromeInbox"
-        )
-    }
-
-    func testChromeFolderValidationUsesRealHomeRatherThanSandboxContainer() throws {
-        let temporaryRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CaptionGrabChromeFolderTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
-
-        let realHome = temporaryRoot.appendingPathComponent("Users/example", isDirectory: true)
-        let sandboxHome = temporaryRoot.appendingPathComponent("Containers/CaptionGrab/Data", isDirectory: true)
-        let selectedChromeRoot = try XCTUnwrap(ChromeCompanionConstants.chromeProfileDirectory(homeURL: realHome))
-        try FileManager.default.createDirectory(at: selectedChromeRoot, withIntermediateDirectories: true)
-
-        XCTAssertTrue(ChromeCompanionConstants.isChromeProfileDirectory(
-            selectedURL: selectedChromeRoot,
-            homeURL: realHome
-        ))
-        XCTAssertFalse(ChromeCompanionConstants.isChromeProfileDirectory(
-            selectedURL: selectedChromeRoot,
-            homeURL: sandboxHome
-        ))
-    }
-
-    func testChromeFolderValidationResolvesSymlinkAndTrailingSlash() throws {
-        let temporaryRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CaptionGrabChromeFolderTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
-
-        let home = temporaryRoot.appendingPathComponent("Users/example", isDirectory: true)
-        let actualChromeRoot = try XCTUnwrap(ChromeCompanionConstants.chromeProfileDirectory(homeURL: home))
-        try FileManager.default.createDirectory(at: actualChromeRoot, withIntermediateDirectories: true)
-
-        let aliases = temporaryRoot.appendingPathComponent("Aliases", isDirectory: true)
-        let selectedFolder = aliases.appendingPathComponent("Chrome", isDirectory: true)
-        try FileManager.default.createDirectory(at: aliases, withIntermediateDirectories: true)
-        try FileManager.default.createSymbolicLink(at: selectedFolder, withDestinationURL: actualChromeRoot)
-        let selectedWithTrailingSlash = URL(fileURLWithPath: selectedFolder.path + "/", isDirectory: true)
-
-        XCTAssertTrue(ChromeCompanionConstants.isChromeProfileDirectory(
-            selectedURL: selectedWithTrailingSlash,
-            homeURL: home
-        ))
-    }
-
-    func testNativeMessagingHostRegistrationUsesChromeProfileFolder() {
-        let chromeRoot = URL(fileURLWithPath: "/Users/example/Library/Application Support/Google/Chrome", isDirectory: true)
-        XCTAssertEqual(
-            ChromeCompanionConstants.chromeNativeMessagingDirectory(chromeRootURL: chromeRoot).path,
+            ChromeCompanionConstants.chromeNativeMessagingDirectory(homeURL: home).path,
             "/Users/example/Library/Application Support/Google/Chrome/NativeMessagingHosts"
         )
+    }
+
+    func testTranscriptInboxUsesCaptionGrabApplicationSupportNotChromeProfile() {
+        let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+        XCTAssertEqual(
+            ChromeCompanionConstants.transcriptInboxDirectory(homeURL: home).path,
+            "/Users/example/Library/Application Support/CaptionGrab/ChromeInbox"
+        )
+        XCTAssertFalse(
+            ChromeCompanionConstants.transcriptInboxDirectory(homeURL: home).path.contains("Google/Chrome")
+        )
+    }
+
+    func testLegacyChromeFolderBookmarkIsRemovedWithoutClearingOtherPreferences() {
+        let suiteName = "CaptionGrabMigrationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let legacyBookmark = Data([1, 2, 3])
+        let unrelatedBookmark = Data([4, 5, 6])
+        defaults.set(legacyBookmark, forKey: ChromeCompanionConstants.legacyChromeFolderBookmarkKey)
+        defaults.set(unrelatedBookmark, forKey: "CaptionGrab.lastSaveFolderBookmark")
+
+        ChromeCompanionConstants.clearLegacyChromeFolderBookmark(from: defaults)
+
+        XCTAssertNil(defaults.data(forKey: ChromeCompanionConstants.legacyChromeFolderBookmarkKey))
+        XCTAssertEqual(defaults.data(forKey: "CaptionGrab.lastSaveFolderBookmark"), unrelatedBookmark)
+    }
+
+    func testSetupFileErrorIncludesOperationExactPathAndUnderlyingDetails() {
+        let path = "/Users/example/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.captiongrab.host.json"
+        let underlying = NSError(
+            domain: NSCocoaErrorDomain,
+            code: 513,
+            userInfo: [
+                NSLocalizedDescriptionKey: "You don’t have permission to save the file.",
+                NSLocalizedFailureReasonErrorKey: "The folder is not writable."
+            ]
+        )
+        let error = FileSystemDiagnostic(operation: "Write Native Messaging manifest", path: path, underlyingError: underlying)
+
+        XCTAssertTrue(error.localizedDescription.contains("Write Native Messaging manifest"))
+        XCTAssertTrue(error.localizedDescription.contains(path))
+        XCTAssertTrue(error.localizedDescription.contains("NSCocoaErrorDomain"))
+        XCTAssertTrue(error.localizedDescription.contains("513"))
+        XCTAssertTrue(error.localizedDescription.contains("You don’t have permission to save the file."))
+        XCTAssertTrue(error.localizedDescription.contains("The folder is not writable."))
     }
 }
