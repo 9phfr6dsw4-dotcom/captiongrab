@@ -10,4 +10,12 @@ public enum TranscriptFormatter {
         guard !captionPairs.isEmpty else { return header }
         return header + "\n\n" + captionPairs.joined(separator: "\n\n")
     }
+
+    public static func markdownFile(for transcript: TranscriptData) -> String {
+        let url = transcript.videoURL.absoluteString
+        let header = "# \(transcript.videoTitle)\n\n**YouTube Video url:** [\(url)](<\(url)>)"
+        let captions = transcript.cues.map { "\($0.displayTimestamp) – \($0.text)" }
+        guard !captions.isEmpty else { return header }
+        return header + "\n\n" + captions.joined(separator: "  \n")
+    }
 }

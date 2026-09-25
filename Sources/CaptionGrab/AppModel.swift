@@ -161,7 +161,7 @@ final class AppModel: ObservableObject {
         do {
             switch format {
             case .markdown:
-                try Data(TranscriptFormatter.markdown(for: transcript).utf8).write(to: destination, options: .atomic)
+                try Data(TranscriptFormatter.markdownFile(for: transcript).utf8).write(to: destination, options: .atomic)
             case .word:
                 try DocxExporter.makeDOCX(for: transcript).write(to: destination, options: .atomic)
             }

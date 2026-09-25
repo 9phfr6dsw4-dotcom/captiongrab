@@ -7,40 +7,56 @@ public enum DocxExporter {
     }
 
     public static func makeDOCX(for transcript: TranscriptData) throws -> Data {
-        var paragraphs = [paragraph(transcript.videoTitle, bold: true), paragraph("YouTube Video url: \(transcript.videoURL.absoluteString)")]
-        for cue in transcript.cues {
-            paragraphs.append(paragraph(cue.displayTimestamp))
-            paragraphs.append(paragraph(cue.text, preservingLineBreaks: true))
+        var paragraphs = [paragraph(transcript.videoTitle, bold: true, fontSizeHalfPoints: 32), "<w:p/>", urlParagraph(for: transcript.videoURL.absoluteString), "<w:p/>"]
+        paragraphs += transcript.cues.map { cue in
+            paragraph("\(cue.displayTimestamp) – \(cue.text)", preservingLineBreaks: true)
         }
 
         let document = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>\(paragraphs.joined())<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>\(paragraphs.joined())<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>
         """
         let contentTypes = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>
         """
-        let relationships = """
+        let packageRelationships = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>
+        """
+        let documentRelationships = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="\(xmlEscape(transcript.videoURL.absoluteString))" TargetMode="External"/></Relationships>
         """
 
         return makeZip([
             ZipEntry(name: "[Content_Types].xml", contents: Data(contentTypes.utf8)),
-            ZipEntry(name: "_rels/.rels", contents: Data(relationships.utf8)),
-            ZipEntry(name: "word/document.xml", contents: Data(document.utf8))
+            ZipEntry(name: "_rels/.rels", contents: Data(packageRelationships.utf8)),
+            ZipEntry(name: "word/document.xml", contents: Data(document.utf8)),
+            ZipEntry(name: "word/_rels/document.xml.rels", contents: Data(documentRelationships.utf8))
         ])
     }
 
-    private static func paragraph(_ text: String, bold: Bool = false, preservingLineBreaks: Bool = false) -> String {
-        let properties = bold ? "<w:rPr><w:b/></w:rPr>" : ""
+    private static func urlParagraph(for url: String) -> String {
+        let label = "<w:r>\(runProperties(bold: true))<w:t xml:space=\"preserve\">YouTube Video url: </w:t></w:r>"
+        let hyperlink = "<w:hyperlink r:id=\"rId2\"><w:r>\(runProperties(color: "0563C1", underlined: true))<w:t xml:space=\"preserve\">\(xmlEscape(url))</w:t></w:r></w:hyperlink>"
+        return "<w:p>\(label)\(hyperlink)</w:p>"
+    }
+
+    private static func paragraph(_ text: String, bold: Bool = false, fontSizeHalfPoints: Int = 24, preservingLineBreaks: Bool = false) -> String {
         let parts = preservingLineBreaks ? text.components(separatedBy: "\n") : [text]
         let runs = parts.enumerated().map { index, part in
             let lineBreak = index == 0 ? "" : "<w:br/>"
             return "\(lineBreak)<w:t xml:space=\"preserve\">\(xmlEscape(part))</w:t>"
         }.joined()
-        return "<w:p><w:r>\(properties)\(runs)</w:r></w:p>"
+        return "<w:p><w:r>\(runProperties(bold: bold, fontSizeHalfPoints: fontSizeHalfPoints))\(runs)</w:r></w:p>"
+    }
+
+    private static func runProperties(bold: Bool = false, fontSizeHalfPoints: Int = 24, color: String? = nil, underlined: Bool = false) -> String {
+        let boldProperty = bold ? "<w:b/>" : ""
+        let colorProperty = color.map { "<w:color w:val=\"\($0)\"/>" } ?? ""
+        let underlineProperty = underlined ? "<w:u w:val=\"single\"/>" : ""
+        return "<w:rPr><w:rFonts w:ascii=\"Times New Roman\" w:eastAsia=\"Times New Roman\" w:hAnsi=\"Times New Roman\" w:cs=\"Times New Roman\"/>\(boldProperty)<w:sz w:val=\"\(fontSizeHalfPoints)\"/><w:szCs w:val=\"\(fontSizeHalfPoints)\"/>\(colorProperty)\(underlineProperty)</w:rPr>"
     }
 
     private static func xmlEscape(_ value: String) -> String {

@@ -14,21 +14,41 @@ final class TranscriptExportTests: XCTestCase {
         )
     }
 
-    func testMarkdownUsesRequestedLayoutAndLeavesEachCueSeparate() {
-        let markdown = TranscriptFormatter.markdown(for: sample())
+    func testMarkdownFileExportUsesHeadingClickableURLAndOneTimestampedLinePerCue() {
+        let markdown = TranscriptFormatter.markdownFile(for: sample())
         XCTAssertEqual(
             markdown,
+            "# Fictional & Sample\n\n**YouTube Video url:** [https://www.youtube.com/watch?v=A1b2C3d4E5F](<https://www.youtube.com/watch?v=A1b2C3d4E5F>)\n\n0:03 – A made-up first line.  \n1:05 – A second synthetic line.\nWith a preserved break."
+        )
+    }
+
+    func testCopyAllMarkdownRemainsUnchanged() {
+        XCTAssertEqual(
+            TranscriptFormatter.markdown(for: sample()),
             "**Fictional & Sample**\n\nYouTube Video url: https://www.youtube.com/watch?v=A1b2C3d4E5F\n\n0:03\nA made-up first line.\n\n1:05\nA second synthetic line.\nWith a preserved break."
         )
     }
 
-    func testWordExportIsAValidZipWithEscapedDocumentText() throws {
+    func testWordExportMatchesRequestedFontsSizesHyperlinkAndCaptionParagraphs() throws {
         let data = try DocxExporter.makeDOCX(for: sample())
         XCTAssertEqual(Array(data.prefix(4)), [0x50, 0x4b, 0x03, 0x04])
-        let bytes = String(decoding: data, as: UTF8.self)
-        XCTAssertTrue(bytes.contains("Fictional &amp; Sample"))
-        XCTAssertTrue(bytes.contains("A made-up first line."))
-        XCTAssertTrue(bytes.contains("YouTube Video url:"))
+        let document = try unzipEntry("word/document.xml", from: data)
+        let relationships = try unzipEntry("word/_rels/document.xml.rels", from: data)
+        XCTAssertTrue(document.contains("Fictional &amp; Sample"))
+        XCTAssertTrue(document.contains("0:03 – A made-up first line."))
+        XCTAssertTrue(document.contains("1:05 – A second synthetic line.<w:br/>With a preserved break."))
+        XCTAssertTrue(document.contains("YouTube Video url: "))
+        XCTAssertTrue(document.contains("<w:hyperlink r:id=\"rId2\">"))
+        XCTAssertTrue(document.contains("<w:color w:val=\"0563C1\"/>"))
+        XCTAssertTrue(document.contains("<w:u w:val=\"single\"/>"))
+        XCTAssertTrue(document.contains("<w:sz w:val=\"32\"/>"))
+        XCTAssertEqual(document.components(separatedBy: "<w:sz w:val=\"24\"/>").count - 1, 4)
+        XCTAssertEqual(document.components(separatedBy: "w:ascii=\"Times New Roman\"").count - 1, 5)
+        XCTAssertEqual(document.components(separatedBy: "<w:p/>").count - 1, 2)
+        XCTAssertEqual(document.components(separatedBy: "<w:p>").count - 1, 4)
+        XCTAssertTrue(relationships.contains("Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink\""))
+        XCTAssertTrue(relationships.contains("Target=\"https://www.youtube.com/watch?v=A1b2C3d4E5F\" TargetMode=\"External\""))
+
         let temporaryURL = FileManager.default.temporaryDirectory.appendingPathComponent("CaptionGrab-\(UUID().uuidString).docx")
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
         try data.write(to: temporaryURL)
@@ -41,5 +61,24 @@ final class TranscriptExportTests: XCTestCase {
         try process.run()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+
+    private func unzipEntry(_ name: String, from data: Data) throws -> String {
+        let temporaryURL = FileManager.default.temporaryDirectory.appendingPathComponent("CaptionGrab-\(UUID().uuidString).docx")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        try data.write(to: temporaryURL)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-p", temporaryURL.path, name]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        try process.run()
+        let contents = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "TranscriptExportTests", code: Int(process.terminationStatus))
+        }
+        return String(decoding: contents, as: UTF8.self)
     }
 }
