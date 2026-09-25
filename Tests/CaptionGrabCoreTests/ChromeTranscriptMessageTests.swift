@@ -34,6 +34,19 @@ final class ChromeTranscriptMessageTests: XCTestCase {
         ))
     }
 
+    func testManualPanelInstructionsArePassedThroughToTheApp() throws {
+        let instructions = "CaptionGrab could not find YouTube’s transcript button automatically. In the Chrome video tab, expand “...more” in the description if shown, scroll down in the expanded description, and click the “Show transcript” button. If the “In this video” panel opens on “Chapters,” click its “Transcript” tab. Wait for transcript lines to appear, then try Get transcript again."
+        let fixture = #"{"type":"captiongrab.error","requestID":"e6b7b1e7-cc6d-4d34-9ab9-c8ec20dd85ce","videoID":"5fJl_ZX91l0","error":"CaptionGrab could not find YouTube’s transcript button automatically. In the Chrome video tab, expand “...more” in the description if shown, scroll down in the expanded description, and click the “Show transcript” button. If the “In this video” panel opens on “Chapters,” click its “Transcript” tab. Wait for transcript lines to appear, then try Get transcript again."}"#
+        let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: Data(fixture.utf8))
+        XCTAssertThrowsError(try message.makeTranscript(
+            expectedRequestID: requestID,
+            expectedVideoID: videoID,
+            canonicalURL: videoURL
+        )) { error in
+            XCTAssertEqual(error as? ChromeTranscriptMessageError, .transcriptUnavailable(instructions))
+        }
+    }
+
     func testReturnsExplicitErrorFromSyntheticBrowserResponse() throws {
         let fixture = #"{"type":"captiongrab.error","requestID":"e6b7b1e7-cc6d-4d34-9ab9-c8ec20dd85ce","videoID":"5fJl_ZX91l0","error":"YouTube did not show an English transcript."}"#
         let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: Data(fixture.utf8))

@@ -2,10 +2,11 @@
 
 (() => {
   const extractor = globalThis.CaptionGrabExtractor;
+  const panelOpener = globalThis.CaptionGrabTranscriptPanel;
   const currentURL = new URL(location.href);
   const requestID = currentURL.searchParams.get('captiongrab_request');
   const requestedVideoID = currentURL.searchParams.get('v');
-  if (!extractor || !requestID || !requestedVideoID) return;
+  if (!extractor || !panelOpener || !requestID || !requestedVideoID) return;
 
   let finished = false;
   const requestURL = new URL(location.href);
@@ -13,45 +14,6 @@
 
   function visibleText(node) {
     return String(node?.innerText ?? node?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  }
-
-  function controls(scope = document) {
-    return [...scope.querySelectorAll('button, [role="button"], tp-yt-paper-button, yt-button-shape, ytd-button-renderer')];
-  }
-
-  function isVisible(node) {
-    if (!node || !node.isConnected) return false;
-    const style = getComputedStyle(node);
-    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0;
-  }
-
-  function findTranscriptButton() {
-    const section = document.querySelector('ytd-video-description-transcript-section-renderer');
-    const local = section ? controls(section) : [];
-    const all = [...local, ...controls()];
-    return all.find(node => isVisible(node) && /^show transcript$/i.test(visibleText(node))) ||
-      all.find(node => isVisible(node) && /show transcript/i.test(node.getAttribute('aria-label') || '')) || null;
-  }
-
-  function expandDescription() {
-    const direct = document.querySelector('ytd-text-inline-expander #expand, #description-inline-expander #expand, #description #expand');
-    if (direct && isVisible(direct)) {
-      direct.click();
-      return true;
-    }
-    const description = document.querySelector('#description, ytd-watch-metadata, ytd-video-secondary-info-renderer');
-    if (!description) return false;
-    const more = controls(description).find(node => isVisible(node) && /^(more|read more)$/i.test(visibleText(node)));
-    if (more) {
-      more.click();
-      return true;
-    }
-    return false;
-  }
-
-  function transcriptPanel() {
-    return document.querySelector('ytd-transcript-renderer, yt-transcript-renderer, ytd-transcript-search-panel-renderer') ||
-      document.querySelector('ytd-engagement-panel-section-list-renderer[target-id*="transcript"]');
   }
 
   function transcriptLanguage(panel) {
@@ -134,10 +96,20 @@
       return;
     }
 
-    let attemptedExpand = false;
-    let attemptedOpen = false;
+    const panelResult = await panelOpener.openTranscriptPanel({
+      document,
+      timeoutMs: 45_000,
+      isPageReady: () => document.readyState === 'complete' &&
+        pageVideoID() === requestedVideoID &&
+        Boolean(document.querySelector('ytd-watch-flexy, ytd-watch-metadata, #movie_player'))
+    });
+    if (!panelResult.ok) {
+      sendError(panelOpener.manualActionMessage(panelResult.reason));
+      return;
+    }
+
     while (!finished && Date.now() - startedAt < 90_000) {
-      const panel = transcriptPanel();
+      const panel = panelOpener.findTranscriptPanel(document);
       let cues = transcriptCues(panel);
       let language = transcriptLanguage(panel);
       if (cues.length && language) {
@@ -165,19 +137,11 @@
         }
       }
 
-      const showTranscript = findTranscriptButton();
-      if (showTranscript && !attemptedOpen) {
-        showTranscript.click();
-        attemptedOpen = true;
-        await new Promise(resolve => setTimeout(resolve, 400));
-        continue;
-      }
-      if (!attemptedExpand) attemptedExpand = expandDescription();
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     if (!finished) {
-      sendError('CaptionGrab could not find an English transcript in this YouTube page. Confirm Show transcript is available, then try again.');
+      sendError('CaptionGrab could not read the English transcript after opening the YouTube transcript panel. In Chrome, confirm that the transcript has loaded and its language is English, then try again.');
     }
   }
 
