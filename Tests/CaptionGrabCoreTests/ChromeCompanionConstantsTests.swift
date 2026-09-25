@@ -2,9 +2,9 @@ import XCTest
 @testable import CaptionGrabCore
 
 final class ChromeCompanionConstantsTests: XCTestCase {
-    func testTranscriptInboxSharesTheUserGrantedChromeProfileFolder() {
+    func testTranscriptInboxSharesTheUserGrantedChromeProfileFolder() throws {
         let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
-        let inbox = ChromeCompanionConstants.inboxDirectory(homeURL: home)
+        let inbox = try XCTUnwrap(ChromeCompanionConstants.inboxDirectory(homeURL: home))
         XCTAssertEqual(
             inbox.path,
             "/Users/example/Library/Application Support/Google/Chrome/CaptionGrab/ChromeInbox"
@@ -18,7 +18,7 @@ final class ChromeCompanionConstantsTests: XCTestCase {
 
         let realHome = temporaryRoot.appendingPathComponent("Users/example", isDirectory: true)
         let sandboxHome = temporaryRoot.appendingPathComponent("Containers/CaptionGrab/Data", isDirectory: true)
-        let selectedChromeRoot = ChromeCompanionConstants.chromeProfileDirectory(homeURL: realHome)
+        let selectedChromeRoot = try XCTUnwrap(ChromeCompanionConstants.chromeProfileDirectory(homeURL: realHome))
         try FileManager.default.createDirectory(at: selectedChromeRoot, withIntermediateDirectories: true)
 
         XCTAssertTrue(ChromeCompanionConstants.isChromeProfileDirectory(
@@ -37,7 +37,7 @@ final class ChromeCompanionConstantsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: temporaryRoot) }
 
         let home = temporaryRoot.appendingPathComponent("Users/example", isDirectory: true)
-        let actualChromeRoot = ChromeCompanionConstants.chromeProfileDirectory(homeURL: home)
+        let actualChromeRoot = try XCTUnwrap(ChromeCompanionConstants.chromeProfileDirectory(homeURL: home))
         try FileManager.default.createDirectory(at: actualChromeRoot, withIntermediateDirectories: true)
 
         let aliases = temporaryRoot.appendingPathComponent("Aliases", isDirectory: true)

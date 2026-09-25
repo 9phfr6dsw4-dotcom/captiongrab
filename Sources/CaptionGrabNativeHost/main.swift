@@ -49,8 +49,11 @@ func writeResponse(_ object: [String: Any]) {
     try? FileHandle.standardOutput.write(contentsOf: frame(body))
 }
 
-func requestDataDirectory() -> URL {
-    ChromeCompanionConstants.inboxDirectory()
+func requestDataDirectory() throws -> URL {
+    guard let inbox = ChromeCompanionConstants.inboxDirectory() else {
+        throw NativeHostFailure.invalidStorageLocation
+    }
+    return inbox
 }
 
 func validate(_ message: ChromeTranscriptMessage) throws -> UUID {
@@ -82,7 +85,7 @@ func runNativeHost() throws {
     let allowedOrigin = "chrome-extension://\(ChromeCompanionConstants.extensionID)/"
     guard arguments.contains(allowedOrigin) else { throw NativeHostFailure.unauthorizedExtension }
 
-    let directory = requestDataDirectory()
+    let directory = try requestDataDirectory()
     let size = Int(readLittleEndianUInt32(try readExactly(4)))
     guard size > 0, size <= maximumMessageBytes else { throw NativeHostFailure.malformedFrame }
     let body = try readExactly(size)

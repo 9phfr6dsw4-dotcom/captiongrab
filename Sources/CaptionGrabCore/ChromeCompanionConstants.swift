@@ -10,40 +10,41 @@ public enum ChromeCompanionConstants {
     public static let chromeFolderBookmarkKey = "CaptionGrab.chromeNativeMessagingFolderBookmark"
 
     // Look up the account home explicitly; NSHomeDirectory() can be redirected to a sandbox container.
-    public static func currentUserHomeDirectory(fileManager: FileManager = .default) -> URL {
+    public static func currentUserHomeDirectory(fileManager: FileManager = .default) -> URL? {
         let userName = NSUserName()
         if let accountHome = fileManager.homeDirectory(forUser: userName) {
             return accountHome
         }
-        if let accountHomePath = NSHomeDirectoryForUser(userName) {
-            return URL(fileURLWithPath: accountHomePath, isDirectory: true)
-        }
-        return fileManager.homeDirectoryForCurrentUser
+        guard let accountHomePath = NSHomeDirectoryForUser(userName) else { return nil }
+        return URL(fileURLWithPath: accountHomePath, isDirectory: true)
     }
 
     public static func canonicalFileURL(_ url: URL) -> URL {
         url.resolvingSymlinksInPath().standardizedFileURL
     }
 
-    public static func chromeProfileDirectory(homeURL: URL? = nil) -> URL {
-        (homeURL ?? currentUserHomeDirectory())
-            .appendingPathComponent("Library/Application Support/Google/Chrome", isDirectory: true)
+    public static func chromeProfileDirectory(homeURL: URL? = nil) -> URL? {
+        guard let homeURL = homeURL ?? currentUserHomeDirectory() else { return nil }
+        return homeURL.appendingPathComponent("Library/Application Support/Google/Chrome", isDirectory: true)
     }
 
     public static func isChromeProfileDirectory(selectedURL: URL, homeURL: URL? = nil) -> Bool {
-        canonicalFileURL(selectedURL) == canonicalFileURL(chromeProfileDirectory(homeURL: homeURL))
+        guard let chromeRoot = chromeProfileDirectory(homeURL: homeURL) else { return false }
+        return canonicalFileURL(selectedURL) == canonicalFileURL(chromeRoot)
     }
 
-    public static func chromeNativeMessagingDirectory(homeURL: URL? = nil) -> URL {
-        chromeNativeMessagingDirectory(chromeRootURL: chromeProfileDirectory(homeURL: homeURL))
+    public static func chromeNativeMessagingDirectory(homeURL: URL? = nil) -> URL? {
+        guard let chromeRoot = chromeProfileDirectory(homeURL: homeURL) else { return nil }
+        return chromeNativeMessagingDirectory(chromeRootURL: chromeRoot)
     }
 
     public static func chromeNativeMessagingDirectory(chromeRootURL: URL) -> URL {
         chromeRootURL.appendingPathComponent("NativeMessagingHosts", isDirectory: true)
     }
 
-    public static func inboxDirectory(homeURL: URL? = nil) -> URL {
-        inboxDirectory(chromeRootURL: chromeProfileDirectory(homeURL: homeURL))
+    public static func inboxDirectory(homeURL: URL? = nil) -> URL? {
+        guard let chromeRoot = chromeProfileDirectory(homeURL: homeURL) else { return nil }
+        return inboxDirectory(chromeRootURL: chromeRoot)
     }
 
     public static func inboxDirectory(chromeRootURL: URL) -> URL {

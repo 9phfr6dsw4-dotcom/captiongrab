@@ -12,6 +12,7 @@ private struct ChromeNativeMessagingManifest: Codable {
 
 private enum ChromeCompanionSetupError: Error, LocalizedError {
     case chromeNotInstalled
+    case userHomeUnavailable
     case nativeHostMissing
     case extensionAssetsMissing
     case wrongChromeFolder
@@ -22,6 +23,8 @@ private enum ChromeCompanionSetupError: Error, LocalizedError {
         switch self {
         case .chromeNotInstalled:
             "Google Chrome is not installed. Install Chrome, then try the setup again."
+        case .userHomeUnavailable:
+            "CaptionGrab couldn't locate your Mac account's home folder. Restart the app and try again."
         case .nativeHostMissing:
             "CaptionGrab's Chrome helper is missing. Reinstall CaptionGrab from its ZIP, then try again."
         case .extensionAssetsMissing:
@@ -37,12 +40,14 @@ private enum ChromeCompanionSetupError: Error, LocalizedError {
 }
 
 enum ChromeCompanionSetup {
-    private static var expectedChromeRoot: URL {
-        ChromeCompanionConstants.canonicalFileURL(ChromeCompanionConstants.chromeProfileDirectory())
+    private static var expectedChromeRoot: URL? {
+        guard let chromeRoot = ChromeCompanionConstants.chromeProfileDirectory() else { return nil }
+        return ChromeCompanionConstants.canonicalFileURL(chromeRoot)
     }
 
     static func savedChromeRoot() -> URL? {
-        guard let data = UserDefaults.standard.data(forKey: ChromeCompanionConstants.chromeFolderBookmarkKey) else { return nil }
+        guard let expectedChromeRoot,
+              let data = UserDefaults.standard.data(forKey: ChromeCompanionConstants.chromeFolderBookmarkKey) else { return nil }
         var stale = false
         guard let folder = try? URL(
             resolvingBookmarkData: data,
@@ -77,6 +82,11 @@ enum ChromeCompanionSetup {
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil else {
             throw ChromeCompanionSetupError.chromeNotInstalled
         }
+        guard let accountHome = ChromeCompanionConstants.currentUserHomeDirectory(),
+              let expectedChromeDirectory = ChromeCompanionConstants.chromeProfileDirectory(homeURL: accountHome) else {
+            throw ChromeCompanionSetupError.userHomeUnavailable
+        }
+        let expectedChromeRoot = ChromeCompanionConstants.canonicalFileURL(expectedChromeDirectory)
         let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
         let hostURL = ChromeCompanionConstants.nativeHostExecutable(bundleURL: appURL)
         let extensionURL = ChromeCompanionConstants.extensionDirectory(bundleURL: appURL)
@@ -106,7 +116,10 @@ enum ChromeCompanionSetup {
             panel.directoryURL = expectedChromeRoot
             guard panel.runModal() == .OK, let selected = panel.url else { return nil }
             scopedURLToStop = selected
-            guard ChromeCompanionConstants.isChromeProfileDirectory(selectedURL: selected) else {
+            guard ChromeCompanionConstants.isChromeProfileDirectory(
+                selectedURL: selected,
+                homeURL: accountHome
+            ) else {
                 throw ChromeCompanionSetupError.wrongChromeFolder
             }
             chromeRoot = selected
