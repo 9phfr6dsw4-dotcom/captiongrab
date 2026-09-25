@@ -11,13 +11,12 @@ private struct ChromeNativeMessagingManifest: Codable {
 }
 
 enum ChromeCompanionSetup {
-    private static let fileManager = FileManager.default
-
     static func isRegistered(bundleURL: URL = Bundle.main.bundleURL) -> Bool {
         registrationProblem(bundleURL: bundleURL) == nil
     }
 
     static func registrationProblem(bundleURL: URL = Bundle.main.bundleURL) -> String? {
+        let fileManager = FileManager.default
         let appURL = bundleURL.resolvingSymlinksInPath().standardizedFileURL
         let hostURL = ChromeCompanionConstants.nativeHostExecutable(bundleURL: appURL)
         let extensionManifestURL = ChromeCompanionConstants.extensionDirectory(bundleURL: appURL)
@@ -66,6 +65,7 @@ enum ChromeCompanionSetup {
     @MainActor
     static func install() throws -> URL {
         ChromeCompanionConstants.clearLegacyChromeFolderBookmark()
+        let fileManager = FileManager.default
 
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil else {
             throw diagnostic(
