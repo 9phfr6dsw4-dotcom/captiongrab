@@ -451,7 +451,7 @@ test('extension manifest requests only the YouTube page and native-messaging per
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.permissions, ['nativeMessaging']);
   assert.deepEqual(manifest.host_permissions, ['https://www.youtube.com/*']);
-  assert.equal(manifest.version, '1.2.9');
+  assert.equal(manifest.version, '1.2.10');
   assert.deepEqual(manifest.content_scripts[0].js, ['transcript-extractor.js', 'transcript-panel-opener.js', 'content.js']);
   const panelOpenerSource = await readFile(path.join(root, 'ChromeExtension/transcript-panel-opener.js'), 'utf8');
   assert.ok(panelOpenerSource.includes('Show transcript'));

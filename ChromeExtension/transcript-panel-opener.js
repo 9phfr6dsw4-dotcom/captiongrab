@@ -289,9 +289,18 @@
         const isVisible = visible(node, document);
         const otherPanel = belongsToDifferentEngagementPanel(node, panel);
         const associated = isAssociatedWithTranscriptPanel(node, panel);
+        const ancestorPanels = [];
+        const seenAncestors = new Set();
+        for (let ancestor = node; ancestor && !seenAncestors.has(ancestor); ancestor = ancestor.parentElement ?? ancestor.getRootNode?.()?.host ?? null) {
+          seenAncestors.add(ancestor);
+          if (!ancestor.matches?.(ENGAGEMENT_PANEL_SELECTOR)) continue;
+          const target = String(ancestor.getAttribute?.('target-id') ?? '');
+          ancestorPanels.push(ancestor === panel ? 'modern' : /transcript/i.test(target) ? 'transcript' : /chapter|macro-marker/i.test(target) ? 'chapters' : 'other');
+        }
         return {
           tag: String(node.tagName ?? '').toLowerCase(),
           role: node.getAttribute?.('role') ?? '',
+          ancestorPanels,
           associated,
           rejection: !isVisible ? 'hidden' : otherPanel ? 'other-panel' :
             associated ? 'none' : chapterItemCount === 0 ? 'no-chapters' :
@@ -317,6 +326,41 @@
 
   function hasTranscriptLines(panel) {
     return nodesIncludingShadow(panel, TRANSCRIPT_LINE_SELECTOR).some(node => visible(node, panel));
+  }
+
+  function panelStructure(panel) {
+    const items = nodesIncludingShadow(panel, 'macro-markers-panel-item-view-model');
+    const samples = [...new Set([items[0], items[Math.floor(items.length / 2)], items.at(-1)].filter(Boolean))];
+    const tree = root => {
+      const queue = [{ node: root, depth: 0 }];
+      const result = [];
+      const seen = new Set();
+      while (queue.length && result.length < 36) {
+        const { node, depth } = queue.shift();
+        if (seen.has(node)) continue;
+        seen.add(node);
+        const tag = String(node.tagName ?? '').toLowerCase();
+        const role = String(node.getAttribute?.('role') ?? '');
+        result.push({
+          tag: /^[a-z][a-z0-9-]{0,79}$/.test(tag) ? tag : 'unknown',
+          depth,
+          role: /^(?:button|tab|tablist|text|list|listitem)$/.test(role) ? role : '',
+          shadowRoot: Boolean(node.shadowRoot)
+        });
+        if (depth < 5) {
+          for (const child of [...(node.children ?? []), ...(node.shadowRoot?.children ?? [])]) {
+            queue.push({ node: child, depth: depth + 1 });
+          }
+        }
+      }
+      return result;
+    };
+    return {
+      itemCount: items.length,
+      oldRowCount: nodesIncludingShadow(panel, TRANSCRIPT_LINE_SELECTOR).length,
+      modernSegmentCount: nodesIncludingShadow(panel, 'transcript-segment-view-model').length,
+      samples: samples.map(tree)
+    };
   }
 
   function isTranscriptRelatedEngagementPanel(panel) {
@@ -467,6 +511,8 @@
     let lastTranscriptButton = null;
     let panelStatesBeforeFirstButtonClick = null;
     let lastTabDiagnostics = '';
+    let lastPanelStructure = '';
+    let nextPanelStructureAt = 0;
     let pendingTabClick = null;
     let lastTabClick = null;
     const record = (event, details = null) => {
@@ -558,6 +604,13 @@
         const serialized = JSON.stringify(details);
         if (serialized !== lastTabDiagnostics) record('Transcript tab candidates', details);
         lastTabDiagnostics = serialized;
+        if (now() >= nextPanelStructureAt) {
+          const structure = panelStructure(transcriptPanel);
+          const fingerprint = JSON.stringify(structure);
+          if (fingerprint !== lastPanelStructure) record('Transcript panel structure', structure);
+          lastPanelStructure = fingerprint;
+          nextPanelStructureAt = now() + (structure.itemCount ? 5_000 : 1_000);
+        }
       }
       if (transcriptPanel && hasTranscriptLines(transcriptPanel)) {
         if (!progress.panelOpened) record('transcript panel opened and transcript rows observed', inspectPage(document, ready).openPanels);
@@ -768,6 +821,10 @@
       ready = false;
     }
     const reason = !ready ? 'page-not-ready' : progress.transcriptButtonClicked ? 'panel-not-loaded' : 'button-not-found';
+    const finalPanel = findTranscriptPanel(document);
+    if (finalPanel?.getAttribute?.('target-id') === 'PAmodern_transcript_view') {
+      record('Transcript panel final structure', panelStructure(finalPanel));
+    }
     if (lastTabClick) {
       record('Transcript tab final state', {
         elapsedSinceClickMs: now() - lastTabClick.at,

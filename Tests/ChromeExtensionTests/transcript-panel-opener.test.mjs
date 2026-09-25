@@ -718,6 +718,39 @@ test('selects the only unlinked Transcript tab when a modern panel opens on chap
   assert.doesNotMatch(result.debugLog, /Synthetic caption line/);
 });
 
+test('logs modern panel structure without caption text when the Transcript tab belongs to another panel', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', ariaLabel: 'Show transcript' }));
+  const otherPanel = document.append(new FakeElement({
+    tag: 'ytd-engagement-panel-section-list-renderer',
+    attributes: { 'target-id': 'engagement-panel-comments-section' }
+  }));
+  const unrelatedTab = otherPanel.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript' }));
+  show.onClick = () => {
+    const panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const item = panel.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model' }));
+    const segment = item.append(new FakeElement({ tag: 'transcript-segment-view-model', text: 'private caption content' }));
+    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
+    shadowRoot.host = segment;
+    segment.shadowRoot = shadowRoot;
+    shadowRoot.append(new FakeElement({ tag: 'span', text: 'private caption content' }));
+  };
+
+  const result = await harness(document, { timeoutMs: 1_000 }).run();
+  assert.equal(result.reason, 'panel-not-loaded');
+  assert.match(result.debugLog, /Transcript tab candidates.*"ancestorPanels":\["other"\]/);
+  assert.match(result.debugLog, /Transcript panel structure.*"itemCount":1/);
+  assert.match(result.debugLog, /Transcript panel structure.*"tag":"transcript-segment-view-model"/);
+  assert.match(result.debugLog, /Transcript panel final structure.*"itemCount":1/);
+  assert.match(result.debugLog, /Transcript panel final structure.*"tag":"span"/);
+  assert.doesNotMatch(result.debugLog, /private caption content/);
+  assert.equal(unrelatedTab.clickCount, 0);
+});
+
 test('logs whether an unlinked Transcript tab click loaded rows rather than silently timing out', async () => {
   const document = new FakeDocument();
   const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
