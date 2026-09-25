@@ -568,6 +568,153 @@ test('finds the Transcript tab in a modern transcript panel shadow root and wait
   assert.equal(result.progress.transcriptLinesLoaded, true);
 });
 
+test('selects the uniquely associated page-level Transcript tab for the modern panel', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  const unrelatedPanel = document.append(new FakeElement({
+    tag: 'ytd-engagement-panel-section-list-renderer',
+    attributes: { 'target-id': 'engagement-panel-comments-section' }
+  }));
+  const unrelatedTab = unrelatedPanel.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript' }));
+  const transcriptTab = document.append(new FakeElement({
+    tag: 'button', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false', 'aria-controls': 'transcript-panel' }
+  }));
+  let panel;
+  show.onClick = () => {
+    panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer', id: 'transcript-panel',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
+    shadowRoot.host = panel;
+    panel.shadowRoot = shadowRoot;
+    shadowRoot.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model', text: 'Chapter 1' }));
+    transcriptTab.onClick = () => {
+      transcriptTab.attributes['aria-selected'] = 'true';
+      shadowRoot.append(new FakeElement({ tag: 'yt-transcript-segment-renderer', text: 'Loaded synthetic caption.' }));
+    };
+  };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(result.panel, panel);
+  assert.equal(unrelatedTab.clickCount, 0);
+  assert.equal(transcriptTab.clickCount, 1);
+  assert.equal(result.progress.transcriptTabSelected, true);
+  assert.equal(result.progress.transcriptLinesLoaded, true);
+});
+
+test('selects the Transcript tab in the enclosing engagement panel for the modern panel', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  let panel;
+  let transcriptTab;
+  show.onClick = () => {
+    const wrapper = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'engagement-panel-video-information' }
+    }));
+    const tabs = wrapper.append(new FakeElement({ tag: 'div', role: 'tablist' }));
+    tabs.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Chapters', attributes: { 'aria-selected': 'true' } }));
+    transcriptTab = tabs.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false' } }));
+    panel = wrapper.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
+    shadowRoot.host = panel;
+    panel.shadowRoot = shadowRoot;
+    shadowRoot.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model', text: 'Chapter 1' }));
+    transcriptTab.onClick = () => {
+      transcriptTab.attributes['aria-selected'] = 'true';
+      shadowRoot.append(new FakeElement({ tag: 'yt-transcript-segment-renderer', text: 'Loaded caption.' }));
+    };
+  };
+
+  const result = await harness(document, { timeoutMs: 45_000 }).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(result.panel, panel);
+  assert.equal(transcriptTab.clickCount, 1);
+  assert.equal(result.progress.transcriptTabSelected, true);
+  assert.equal(result.progress.transcriptLinesLoaded, true);
+});
+
+test('does not guess between page-level Transcript tabs for a modern panel', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  const firstTab = document.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript' }));
+  const secondTab = document.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript' }));
+  show.onClick = () => document.append(new FakeElement({
+    tag: 'ytd-engagement-panel-section-list-renderer',
+    attributes: { 'target-id': 'PAmodern_transcript_view' }
+  }));
+
+  await harness(document).run();
+
+  assert.equal(firstTab.clickCount, 0);
+  assert.equal(secondTab.clickCount, 0);
+});
+
+test('does not click an unassociated page-level Transcript tab for the modern panel', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  const transcriptTab = document.append(new FakeElement({ tag: 'button', role: 'tab', text: 'Transcript' }));
+  show.onClick = () => {
+    const panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
+    shadowRoot.host = panel;
+    panel.shadowRoot = shadowRoot;
+    shadowRoot.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model', text: 'Chapter 1' }));
+  };
+
+  const result = await harness(document, { timeoutMs: 1_000 }).run();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'panel-not-loaded');
+  assert.equal(transcriptTab.clickCount, 0);
+  assert.equal(result.progress.panelOpened, true);
+  assert.equal(result.progress.transcriptTabSelected, false);
+});
+
+test('does not click an unrelated page-level Transcript button when the modern panel only shows chapters', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  const unrelatedButton = document.append(new FakeElement({ tag: 'button', text: 'Transcript', ariaLabel: 'Transcript' }));
+  let panel;
+  show.onClick = () => {
+    panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
+    shadowRoot.host = panel;
+    panel.shadowRoot = shadowRoot;
+    for (let index = 1; index <= 6; index += 1) {
+      shadowRoot.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model', text: `Chapter ${index}` }));
+    }
+  };
+
+  const result = await harness(document, { timeoutMs: 45_000 }).run();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'panel-not-loaded');
+  assert.equal(result.panel, undefined);
+  assert.equal(unrelatedButton.clickCount, 0);
+  assert.equal(result.progress.panelOpened, true);
+  assert.equal(result.progress.transcriptTabSelected, false);
+  assert.equal(result.progress.transcriptLinesLoaded, false);
+});
+
 test('waits for transcript rows when the Transcript tab is already selected without toggling it', async () => {
   const document = new FakeDocument();
   const panel = document.append(new FakeElement({ tag: 'ytd-engagement-panel-section-list-renderer', text: 'In this video' }));

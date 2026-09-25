@@ -180,10 +180,74 @@
     ])];
   }
 
-  function findTranscriptTab(panel) {
-    return nodesIncludingShadow(panel, TRANSCRIPT_TAB_SELECTOR).find(node => visible(node, panel) && labels(node).some(value =>
+  function hasTranscriptTabLabel(node) {
+    return labels(node).some(value =>
       /^transcript$/i.test(value) || value.toLowerCase() === 'transcript tab'
-    )) ?? null;
+    );
+  }
+
+  function isAncestorOrSelf(ancestor, node) {
+    let current = node;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      if (current === ancestor) return true;
+      seen.add(current);
+      current = current.parentElement ?? current.getRootNode?.()?.host ?? null;
+    }
+    return false;
+  }
+
+  function belongsToDifferentEngagementPanel(node, panel) {
+    let current = node;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      if (current !== panel && current.matches?.(ENGAGEMENT_PANEL_SELECTOR) && !isAncestorOrSelf(current, panel)) return true;
+      if (current === panel) return false;
+      seen.add(current);
+      current = current.parentElement ?? current.getRootNode?.()?.host ?? null;
+    }
+    return false;
+  }
+
+  function isAssociatedWithTranscriptPanel(node, panel) {
+    if (belongsToDifferentEngagementPanel(node, panel)) return false;
+
+    let current = node;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      if (current === panel) return true;
+      if (current.matches?.(ENGAGEMENT_PANEL_SELECTOR) && isAncestorOrSelf(current, panel)) return true;
+      seen.add(current);
+      current = current.parentElement ?? current.getRootNode?.()?.host ?? null;
+    }
+
+    const panelReferences = [
+      panel?.id,
+      panel?.getAttribute?.('id'),
+      panel?.getAttribute?.('target-id'),
+      panel?.getAttribute?.('targetId')
+    ].map(value => String(value ?? '').trim()).filter(Boolean);
+    const tabReferences = [node?.getAttribute?.('aria-controls'), node?.getAttribute?.('aria-owns')]
+      .flatMap(value => String(value ?? '').trim().split(/\s+/)).filter(Boolean);
+    if (panelReferences.some(value => tabReferences.includes(value))) return true;
+
+    const tabID = String(node?.id ?? node?.getAttribute?.('id') ?? '').trim();
+    const panelLabelReferences = String(panel?.getAttribute?.('aria-labelledby') ?? '').trim().split(/\s+/).filter(Boolean);
+    return Boolean(tabID && panelLabelReferences.includes(tabID));
+  }
+
+  function findTranscriptTab(panel, document = null) {
+    const localTab = nodesIncludingShadow(panel, TRANSCRIPT_TAB_SELECTOR).find(node =>
+      visible(node, document ?? panel) && hasTranscriptTabLabel(node)
+    );
+    if (localTab) return localTab;
+
+    const targetID = panel?.getAttribute?.('target-id') ?? panel?.getAttribute?.('targetId') ?? '';
+    if (targetID !== 'PAmodern_transcript_view' || !document) return null;
+    const pageTabs = nodesIncludingShadow(document, '[role="tab"], tp-yt-paper-tab, yt-tab-shape').filter(node =>
+      visible(node, document) && hasTranscriptTabLabel(node) && isAssociatedWithTranscriptPanel(node, panel)
+    );
+    return pageTabs.length === 1 ? pageTabs[0] : null;
   }
 
   function transcriptTabIsSelected(tab) {
@@ -215,27 +279,27 @@
     return engagementPanels.find(node => {
       const targetID = node.getAttribute?.('target-id') ?? node.getAttribute?.('targetId') ?? '';
       if (/transcript/i.test(targetID)) return true;
-      const transcriptTab = findTranscriptTab(node);
+      const transcriptTab = findTranscriptTab(node, document);
       return Boolean(transcriptTab && transcriptTabIsSelected(transcriptTab));
     }) ?? null;
   }
 
-  function engagementPanelState(panel) {
+  function engagementPanelState(panel, document = null) {
     const targetID = panel.getAttribute?.('target-id') ?? panel.getAttribute?.('targetId') ?? '';
-    const transcriptTab = findTranscriptTab(panel);
+    const transcriptTab = findTranscriptTab(panel, document);
     return `${targetID}|${transcriptTab ? transcriptTabIsSelected(transcriptTab) : false}`;
   }
 
   function captureEngagementPanelStates(document) {
     return new Map(nodes(document, ENGAGEMENT_PANEL_SELECTOR)
-      .filter(panel => visible(panel, document) && findTranscriptTab(panel))
-      .map(panel => [panel, engagementPanelState(panel)]));
+      .filter(panel => visible(panel, document) && findTranscriptTab(panel, document))
+      .map(panel => [panel, engagementPanelState(panel, document)]));
   }
 
   function findEngagementPanelOpenedSince(document, previousStates) {
     return nodes(document, ENGAGEMENT_PANEL_SELECTOR).find(panel => {
-      if (!visible(panel, document) || !isTranscriptRelatedEngagementPanel(panel) || !findTranscriptTab(panel)) return false;
-      return !previousStates.has(panel) || previousStates.get(panel) !== engagementPanelState(panel);
+      if (!visible(panel, document) || !isTranscriptRelatedEngagementPanel(panel) || !findTranscriptTab(panel, document)) return false;
+      return !previousStates.has(panel) || previousStates.get(panel) !== engagementPanelState(panel, document);
     }) ?? null;
   }
 
@@ -414,7 +478,7 @@
       if (transcriptPanel && hasTranscriptLines(transcriptPanel)) {
         if (!progress.panelOpened) record('transcript panel opened and transcript rows observed', inspectPage(document, ready).openPanels);
         progress.panelOpened = true;
-        const transcriptTab = findTranscriptTab(transcriptPanel);
+        const transcriptTab = findTranscriptTab(transcriptPanel, document);
         if (transcriptTab && !transcriptTabIsSelected(transcriptTab) && !clickedTranscriptTabs.has(transcriptTab)) {
           try {
             scrollIntoView(transcriptTab);
@@ -441,7 +505,7 @@
         if (transcriptPanel) {
           if (!progress.panelOpened) record('transcript panel appeared after Show transcript click', inspectPage(document, ready).openPanels);
           progress.panelOpened = true;
-          const transcriptTab = findTranscriptTab(transcriptPanel);
+          const transcriptTab = findTranscriptTab(transcriptPanel, document);
           if (transcriptTab && !transcriptTabIsSelected(transcriptTab) && !clickedTranscriptTabs.has(transcriptTab)) {
             try {
               scrollIntoView(transcriptTab);
