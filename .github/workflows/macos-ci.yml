@@ -21,6 +21,8 @@ jobs:
           test "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -ge 26
       - name: Run Chrome extension fixture tests
         run: node --test Tests/ChromeExtensionTests/*.test.mjs
+      - name: Check link clear UI contract
+        run: python3 -m unittest discover -s Tests/CaptionGrabUITests -p 'test_*.py' -v
       - name: Run synthetic-fixture tests
         run: swift test
       - name: Build, package, and verify app

@@ -50,6 +50,19 @@ struct MainView: View {
                     .focused($inputFocused)
                     .onSubmit { fetch() }
                     .onDrop(of: [UTType.url.identifier, UTType.plainText.identifier], isTargeted: nil, perform: acceptDrop)
+                if !model.inputURL.isEmpty {
+                    Button {
+                        model.inputURL = ""
+                        inputFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear YouTube link")
+                    .help("Clear YouTube link")
+                    .disabled(model.isLoading)
+                }
                 Button(action: fetch) {
                     if model.isLoading {
                         ProgressView().controlSize(.small)
