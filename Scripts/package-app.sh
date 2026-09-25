@@ -22,8 +22,8 @@ rm -rf "$APP/Contents/Resources/CaptionGrab.iconset"
 
 plutil -lint "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" | grep -Fx '26.0'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx '1.2.10'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" | grep -Fx '14'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx '1.2.11'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" | grep -Fx '15'
 codesign --force --sign - "$APP/Contents/MacOS/CaptionGrabNativeHost"
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"

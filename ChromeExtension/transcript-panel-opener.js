@@ -236,6 +236,23 @@
     return Boolean(tabID && panelLabelReferences.includes(tabID));
   }
 
+  function modernTranscriptTabCandidates(panel, document) {
+    const elements = allElements(document);
+    const tabs = elements.filter(node =>
+      node.matches?.('[role="tab"], tp-yt-paper-tab, yt-tab-shape') &&
+      visible(node, document) && hasTranscriptTabLabel(node) && !belongsToDifferentEngagementPanel(node, panel)
+    );
+    const closeControls = elements.filter(node =>
+      node.matches?.('button, [role="button"]') &&
+      visible(node, document) && !belongsToDifferentEngagementPanel(node, panel) &&
+      labels(node).some(value => /^close transcript$/i.test(value))
+    );
+    const chapterItemCount = nodesIncludingShadow(panel, 'macro-markers-panel-item-view-model').filter(node =>
+      visible(node, document)
+    ).length;
+    return { tabs, closeControls, chapterItemCount };
+  }
+
   function findTranscriptTab(panel, document = null) {
     const localTab = nodesIncludingShadow(panel, TRANSCRIPT_TAB_SELECTOR).find(node =>
       visible(node, document ?? panel) && hasTranscriptTabLabel(node)
@@ -244,10 +261,48 @@
 
     const targetID = panel?.getAttribute?.('target-id') ?? panel?.getAttribute?.('targetId') ?? '';
     if (targetID !== 'PAmodern_transcript_view' || !document) return null;
-    const pageTabs = nodesIncludingShadow(document, '[role="tab"], tp-yt-paper-tab, yt-tab-shape').filter(node =>
-      visible(node, document) && hasTranscriptTabLabel(node) && isAssociatedWithTranscriptPanel(node, panel)
+    const { tabs, closeControls, chapterItemCount } = modernTranscriptTabCandidates(panel, document);
+    const associatedTabs = tabs.filter(node => isAssociatedWithTranscriptPanel(node, panel));
+    if (associatedTabs.length === 1) return associatedTabs[0];
+    // The modern UI can render its tab outside the panel without an ARIA link.
+    // Only use that tab when the modern panel shows chapters and the page
+    // also exposes YouTube's transcript-specific close control.
+    return associatedTabs.length === 0 && tabs.length === 1 && closeControls.length > 0 && chapterItemCount > 0
+      ? tabs[0] : null;
+  }
+
+  function modernTranscriptTabDiagnostics(panel, document) {
+    const { tabs, closeControls, chapterItemCount } = modernTranscriptTabCandidates(panel, document);
+    const allTabs = allElements(document).filter(node =>
+      node.matches?.('[role="tab"], tp-yt-paper-tab, yt-tab-shape') && hasTranscriptTabLabel(node)
     );
-    return pageTabs.length === 1 ? pageTabs[0] : null;
+    return {
+      targetId: panel.getAttribute?.('target-id') ?? '',
+      localTabCount: nodesIncludingShadow(panel, TRANSCRIPT_TAB_SELECTOR).filter(node =>
+        visible(node, document) && hasTranscriptTabLabel(node)
+      ).length,
+      pageTabCount: tabs.length,
+      inspectedTabCount: allTabs.length,
+      closeTranscriptControlCount: closeControls.length,
+      chapterItemCount,
+      tabs: allTabs.slice(0, 5).map(node => {
+        const isVisible = visible(node, document);
+        const otherPanel = belongsToDifferentEngagementPanel(node, panel);
+        const associated = isAssociatedWithTranscriptPanel(node, panel);
+        return {
+          tag: String(node.tagName ?? '').toLowerCase(),
+          role: node.getAttribute?.('role') ?? '',
+          associated,
+          rejection: !isVisible ? 'hidden' : otherPanel ? 'other-panel' :
+            associated ? 'none' : chapterItemCount === 0 ? 'no-chapters' :
+              closeControls.length === 0 ? 'no-close-control' : tabs.length !== 1 ? 'ambiguous' : 'none',
+          hasAriaControls: Boolean(node.getAttribute?.('aria-controls')),
+          selected: transcriptTabIsSelected(node),
+          inViewport: inViewport(node, document)
+        };
+      }),
+      selectedTab: findTranscriptTab(panel, document) ? 'found' : 'none'
+    };
   }
 
   function transcriptTabIsSelected(tab) {
@@ -307,16 +362,24 @@
     return { ...progress };
   }
 
+  function debugControlLabel(value) {
+    const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    if (/^(show transcript|close transcript|transcript|transcript tab|chapters|\.\.\.more|…more|more|read more)$/i.test(normalized)) return normalized;
+    if (/^chapter\s+\d+\b/i.test(normalized)) return 'Chapter item';
+    return '[other control]';
+  }
+
   function describeControl(node, document = null) {
     const values = labels(node);
     return {
       tag: String(node?.tagName ?? '').toLowerCase(),
       id: String(node?.id ?? '').slice(0, 120),
       role: String(node?.getAttribute?.('role') ?? '').slice(0, 80),
-      text: String(node?.innerText ?? node?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
-      ariaLabel: String(node?.getAttribute?.('aria-label') ?? '').slice(0, 180),
-      title: String(node?.getAttribute?.('title') ?? '').slice(0, 120),
-      labels: values.slice(0, 4).map(value => value.slice(0, 180)),
+      text: debugControlLabel(node?.innerText ?? node?.textContent),
+      ariaLabel: debugControlLabel(node?.getAttribute?.('aria-label')),
+      title: debugControlLabel(node?.getAttribute?.('title')),
+      labels: values.slice(0, 4).map(debugControlLabel),
       visible: document ? visible(node, document) : Boolean(node && node.isConnected !== false && !node.hidden && node.getAttribute?.('aria-hidden') !== 'true'),
       inViewport: document ? inViewport(node, document) : null
     };
@@ -327,7 +390,7 @@
       tag: String(node?.tagName ?? '').toLowerCase(),
       id: String(node?.id ?? '').slice(0, 120),
       targetId: String(node?.getAttribute?.('target-id') ?? node?.getAttribute?.('targetId') ?? '').slice(0, 160),
-      ariaLabel: String(node?.getAttribute?.('aria-label') ?? '').slice(0, 160),
+      ariaLabel: debugControlLabel(node?.getAttribute?.('aria-label')),
       visible: visible(node, document)
     };
   }
@@ -403,6 +466,9 @@
     let nextTranscriptPanelCheckAt = null;
     let lastTranscriptButton = null;
     let panelStatesBeforeFirstButtonClick = null;
+    let lastTabDiagnostics = '';
+    let pendingTabClick = null;
+    let lastTabClick = null;
     const record = (event, details = null) => {
       const elapsed = Math.max(0, now() - startedAt);
       const suffix = details === null ? '' : ` ${JSON.stringify(details)}`;
@@ -469,11 +535,29 @@
       }
 
       let transcriptPanel = findTranscriptPanel(document);
+      if (pendingTabClick) {
+        const selected = transcriptTabIsSelected(pendingTabClick.tab);
+        const rowsLoaded = hasTranscriptLines(pendingTabClick.panel);
+        progress.transcriptTabSelected = selected;
+        record('Transcript tab click outcome', {
+          selected,
+          rowsLoaded,
+          tabConnected: pendingTabClick.tab.isConnected !== false,
+          panelConnected: pendingTabClick.panel.isConnected !== false
+        });
+        pendingTabClick = null;
+      }
       if (!transcriptPanel && transcriptButtonAttempts > 0 && panelStatesBeforeFirstButtonClick) {
         transcriptPanel = findEngagementPanelOpenedSince(document, panelStatesBeforeFirstButtonClick);
         if (transcriptPanel) {
           record('new In this video panel appeared after Show transcript click', describePanel(transcriptPanel, document));
         }
+      }
+      if (transcriptPanel?.getAttribute?.('target-id') === 'PAmodern_transcript_view' && transcriptButtonAttempts > 0) {
+        const details = modernTranscriptTabDiagnostics(transcriptPanel, document);
+        const serialized = JSON.stringify(details);
+        if (serialized !== lastTabDiagnostics) record('Transcript tab candidates', details);
+        lastTabDiagnostics = serialized;
       }
       if (transcriptPanel && hasTranscriptLines(transcriptPanel)) {
         if (!progress.panelOpened) record('transcript panel opened and transcript rows observed', inspectPage(document, ready).openPanels);
@@ -486,6 +570,8 @@
             transcriptTab.click();
             clickedTranscriptTabs.add(transcriptTab);
             progress.transcriptTabSelected = true;
+            pendingTabClick = { tab: transcriptTab, panel: transcriptPanel };
+            lastTabClick = { tab: transcriptTab, panel: transcriptPanel, at: now() };
           } catch (error) {
             record('Transcript tab click threw', { error: String(error).slice(0, 240) });
           }
@@ -513,6 +599,8 @@
               transcriptTab.click();
               clickedTranscriptTabs.add(transcriptTab);
               progress.transcriptTabSelected = true;
+              pendingTabClick = { tab: transcriptTab, panel: transcriptPanel };
+              lastTabClick = { tab: transcriptTab, panel: transcriptPanel, at: now() };
             } catch (error) {
               record('Transcript tab click threw', { error: String(error).slice(0, 240) });
             }
@@ -680,6 +768,15 @@
       ready = false;
     }
     const reason = !ready ? 'page-not-ready' : progress.transcriptButtonClicked ? 'panel-not-loaded' : 'button-not-found';
+    if (lastTabClick) {
+      record('Transcript tab final state', {
+        elapsedSinceClickMs: now() - lastTabClick.at,
+        selected: transcriptTabIsSelected(lastTabClick.tab),
+        rowsLoaded: hasTranscriptLines(lastTabClick.panel),
+        tabConnected: lastTabClick.tab.isConnected !== false,
+        panelConnected: lastTabClick.panel.isConnected !== false
+      });
+    }
     record('automation stopped', { reason, elapsedMs: now() - startedAt, progress: progressSnapshot(progress) });
     return {
       ok: false,
