@@ -11,9 +11,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const page = new URL(sender.url || '');
     const videoID = page.searchParams.get('v');
     const requestID = page.searchParams.get('captiongrab_request');
-    if (page.protocol !== 'https:' || page.hostname !== 'www.youtube.com' || page.pathname !== '/watch' ||
-        !REQUEST_ID.test(requestID || '') || requestID !== message.requestID ||
-        !VIDEO_ID.test(videoID || '') || videoID !== message.videoID) {
+    const requestMatches = REQUEST_ID.test(requestID || '') && requestID === message.requestID;
+    const messageVideoIsValid = VIDEO_ID.test(message.videoID || '');
+    const pageIsValid = page.protocol === 'https:' && page.hostname === 'www.youtube.com' && page.pathname === '/watch';
+    const videoMatches = VIDEO_ID.test(videoID || '') && videoID === message.videoID;
+    const isSafeMismatchError = message.type === 'captiongrab.error' && messageVideoIsValid;
+    if (!pageIsValid || !requestMatches || !messageVideoIsValid || (!videoMatches && !isSafeMismatchError)) {
       sendResponse({ ok: false, error: 'CaptionGrab rejected a message not tied to the requested YouTube video.' });
       return false;
     }

@@ -1,6 +1,6 @@
 # CaptionGrab
 
-CaptionGrab is a native SwiftUI macOS app for fetching an English caption track from a YouTube link and exporting it as Markdown or Word (`.docx`). It prefers creator-made English captions and falls back to auto-generated English captions, with the track type shown in the app.
+CaptionGrab is a native SwiftUI macOS app for fetching an English caption track from a YouTube link and exporting it as Markdown or Word (`.docx`). It prefers creator-made English captions and falls back to auto-generated English captions, with the track type shown in the app. If YouTube blocks direct requests, CaptionGrab can automatically read the transcript panel from a matching YouTube page in Chrome through its bundled unpacked extension and local Native Messaging helper.
 
 **CaptionGrab is an unofficial personal-use tool and is not affiliated with, endorsed by, or sponsored by YouTube or Google.** It uses YouTube's undocumented web-player behavior, which may change or become unavailable.
 
@@ -18,6 +18,15 @@ CaptionGrab preserves the caption events and text supplied by YouTube, including
 ## Download
 
 Download the latest `CaptionGrab.zip` from [GitHub Releases](https://github.com/9phfr6dsw4-dotcom/captiongrab/releases/latest). The app is ad-hoc signed and not notarized; macOS may require Control-click → **Open** the first time.
+
+| Feature | Setup |
+| --- | --- |
+| Chrome fallback | Open CaptionGrab and click **Set up Chrome extension**. Approve the folder prompt for `Library/Application Support/Google/Chrome`. In Chrome's extensions page, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder shown in Finder. |
+| Automatic capture | Click **Get transcript** as usual. When direct retrieval is blocked, CaptionGrab opens the matching YouTube page in Chrome, reads the English transcript panel, and imports it locally. |
+| Stable extension ID | The unpacked extension's `manifest.json` contains its public `key`; its ID remains `kajphiodjnkmgeidbcndikaaegghiffi` if you move the extension folder. |
+| Local-only bridge | The extension needs only YouTube page access and `nativeMessaging`. It reads transcript text from the displayed page and sends it to a local helper; it does not request cookie access. Captured data stays in a CaptionGrab subfolder of Chrome's local profile. |
+
+Keep CaptionGrab in its installed location after setup. If you move the app itself, click **Set up Chrome extension** again so Chrome's local helper registration can be refreshed. You can move the extension folder without changing the extension ID.
 
 ## Build and test
 
