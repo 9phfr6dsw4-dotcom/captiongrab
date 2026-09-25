@@ -47,6 +47,30 @@ final class ChromeTranscriptMessageTests: XCTestCase {
         }
     }
 
+    func testIncludesStepByStepChromeAutomationProgressInTheAppError() throws {
+        let fixture = #"{"type":"captiongrab.error","requestID":"e6b7b1e7-cc6d-4d34-9ab9-c8ec20dd85ce","videoID":"5fJl_ZX91l0","error":"YouTube did not show the transcript panel after CaptionGrab clicked its button.","progress":{"descriptionExpanded":true,"transcriptSectionFound":true,"transcriptButtonFound":true,"transcriptButtonClicked":true,"panelOpened":false,"transcriptTabSelected":false,"transcriptLinesLoaded":false}}"#
+        let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: Data(fixture.utf8))
+        let expected = """
+        YouTube did not show the transcript panel after CaptionGrab clicked its button.
+
+        Chrome automation progress:
+        - Description expanded: yes
+        - Transcript section found: yes
+        - Show transcript button found: yes
+        - Show transcript button clicked: yes
+        - Transcript panel opened: no
+        - Transcript tab selected: no
+        - Transcript lines loaded: no
+        """
+        XCTAssertThrowsError(try message.makeTranscript(
+            expectedRequestID: requestID,
+            expectedVideoID: videoID,
+            canonicalURL: videoURL
+        )) { error in
+            XCTAssertEqual(error as? ChromeTranscriptMessageError, .transcriptUnavailable(expected))
+        }
+    }
+
     func testReturnsExplicitErrorFromSyntheticBrowserResponse() throws {
         let fixture = #"{"type":"captiongrab.error","requestID":"e6b7b1e7-cc6d-4d34-9ab9-c8ec20dd85ce","videoID":"5fJl_ZX91l0","error":"YouTube did not show an English transcript."}"#
         let message = try JSONDecoder().decode(ChromeTranscriptMessage.self, from: Data(fixture.utf8))

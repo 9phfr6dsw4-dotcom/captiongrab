@@ -72,14 +72,15 @@
     });
   }
 
-  function sendError(error) {
+  function sendError(error, progress = null) {
     if (finished) return;
     finished = true;
     const message = {
       type: 'captiongrab.error',
       requestID,
       videoID: requestedVideoID,
-      error: String(error || 'Chrome could not read the YouTube transcript.').slice(0, 1000)
+      error: String(error || 'Chrome could not read the YouTube transcript.').slice(0, 1000),
+      ...(progress ? { progress } : {})
     };
     displayStatus(message.error, true);
     sendToApp(message);
@@ -104,7 +105,7 @@
         Boolean(document.querySelector('ytd-watch-flexy, ytd-watch-metadata, #movie_player'))
     });
     if (!panelResult.ok) {
-      sendError(panelOpener.manualActionMessage(panelResult.reason));
+      sendError(panelOpener.manualActionMessage(panelResult.reason), panelResult.progress);
       return;
     }
 
@@ -114,7 +115,7 @@
       let language = transcriptLanguage(panel);
       if (cues.length && language) {
         if (!/^English(?:\s+\(auto-generated\))?$/i.test(language)) {
-          sendError(`The transcript panel is set to ${language}, not English. Choose English in the transcript panel and try again.`);
+          sendError(`The transcript panel is set to ${language}, not English. Choose English in the transcript panel and try again.`, panelResult.progress);
           return;
         }
         const heading = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, ytd-watch-metadata h1, h1');
@@ -132,7 +133,7 @@
           sendToApp(message);
           return;
         } catch (error) {
-          sendError(error instanceof Error ? error.message : String(error));
+          sendError(error instanceof Error ? error.message : String(error), panelResult.progress);
           return;
         }
       }
@@ -141,7 +142,7 @@
     }
 
     if (!finished) {
-      sendError('CaptionGrab could not read the English transcript after opening the YouTube transcript panel. In Chrome, confirm that the transcript has loaded and its language is English, then try again.');
+      sendError('CaptionGrab could not read the English transcript after opening the YouTube transcript panel. In Chrome, confirm that the transcript has loaded and its language is English, then try again.', panelResult.progress);
     }
   }
 
