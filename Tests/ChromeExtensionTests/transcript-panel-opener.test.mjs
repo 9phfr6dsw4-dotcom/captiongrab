@@ -132,7 +132,8 @@ test('waits for full page load, retries late controls, expands the description, 
         more.onClick = () => {};
       }
       if (tickCount === 6 && more?.clickCount && !show) {
-        show = description.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+        const showRenderer = description.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+        show = showRenderer.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
         show.onClick = () => { transcriptPanel(document); };
       }
     }
@@ -155,13 +156,14 @@ test('opens the In this video panel and switches from Chapters to Transcript bef
   more.onClick = () => {
     actions.push('expand-description');
     const transcriptSection = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
-    const show = transcriptSection.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+    const showRenderer = transcriptSection.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+    const show = showRenderer.append(new FakeElement({ tag: 'button', ariaLabel: 'Show transcript' }));
     show.onClick = () => {
       actions.push('show-transcript');
       const panel = document.append(new FakeElement({
         tag: 'ytd-engagement-panel-section-list-renderer',
         text: 'In this video',
-        attributes: { 'target-id': 'engagement-panel-macro-markers-description-chapters' }
+        attributes: { 'target-id': 'engagement-panel-transcript-search' }
       }));
       const chapters = panel.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Chapters', attributes: { 'aria-selected': 'true' } }));
       const transcript = panel.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false' } }));
@@ -186,7 +188,7 @@ test('opens the In this video panel and switches from Chapters to Transcript bef
   assert.equal(result.ok, true);
   assert.equal(more.clickCount, 1);
   assert.deepEqual(actions, ['expand-description', 'show-transcript', 'select-transcript-tab']);
-  assert.equal(result.panel.getAttribute('target-id'), 'engagement-panel-macro-markers-description-chapters');
+  assert.equal(result.panel.getAttribute('target-id'), 'engagement-panel-transcript-search');
   assert.ok(result.panel.querySelectorAll('ytd-transcript-segment-renderer').length > 0);
 });
 
@@ -308,9 +310,126 @@ test('clicks the custom YouTube button host when Show transcript text lives in i
   const result = await harness(document).run();
   assert.equal(result.ok, true, result.debugLog);
   assert.equal(shadowHost.clickCount, 1);
-  assert.match(result.debugLog, /clicked Show transcript control/);
+  assert.match(result.debugLog, /clicked Show transcript button/);
 });
 
+test('falls back to the page when the Transcript section does not contain the button', async () => {
+  const document = new FakeDocument();
+  document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer', text: 'Follow along using the transcript' }));
+  const wrapper = document.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+  const button = wrapper.append(new FakeElement({ tag: 'button', ariaLabel: 'Show transcript' }));
+  button.onClick = () => { transcriptPanel(document); };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(wrapper.clickCount, 0);
+  assert.equal(button.clickCount, 1);
+});
+
+test('does not click an unrelated sole button inside a Transcript section when the real control is elsewhere', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const labelledContent = section.append(new FakeElement({ tag: 'div', text: 'Follow along using the transcript Show transcript' }));
+  const unrelatedButton = labelledContent.append(new FakeElement({ tag: 'button', text: 'More actions', ariaLabel: 'More actions' }));
+  const renderer = document.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+  const actualButton = renderer.append(new FakeElement({ tag: 'button', ariaLabel: 'Show transcript' }));
+  actualButton.onClick = () => { transcriptPanel(document); };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(unrelatedButton.clickCount, 0);
+  assert.equal(renderer.clickCount, 0);
+  assert.equal(actualButton.clickCount, 1);
+});
+
+test('clicks the inner visible Show transcript button rather than the ytd-button-renderer wrapper', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const wrapper = section.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+  const buttonShape = wrapper.append(new FakeElement({ tag: 'yt-button-shape', text: 'Show transcript' }));
+  const actualButton = buttonShape.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  actualButton.onClick = () => { transcriptPanel(document); };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(wrapper.clickCount, 0);
+  assert.equal(buttonShape.clickCount, 0);
+  assert.equal(actualButton.clickCount, 1);
+  assert.match(result.debugLog, /clicked Show transcript button/);
+  assert.match(result.debugLog, /"tag":"button"/);
+});
+
+test('prefers the on-screen Show transcript button over hidden duplicate matches', async () => {
+  const document = new FakeDocument();
+  document.defaultView = { innerWidth: 1_000, innerHeight: 700 };
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const addButton = (top, onClick) => {
+    const wrapper = section.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+    const button = wrapper.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+    button.getBoundingClientRect = () => ({ left: 100, right: 300, top, bottom: top + 40, width: 200, height: 40 });
+    button.onClick = onClick;
+    return button;
+  };
+  const hiddenCopy = addButton(900, () => {});
+  const visibleButton = addButton(400, () => { transcriptPanel(document); });
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(hiddenCopy.clickCount, 0);
+  assert.equal(visibleButton.clickCount, 1);
+  assert.match(result.debugLog, /"inViewport":true/);
+});
+
+test('retries the actual Show transcript button after two seconds, up to three total attempts', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const wrapper = section.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+  const actualButton = wrapper.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  let currentTime = 0;
+  const clickTimes = [];
+  actualButton.onClick = () => {
+    clickTimes.push(currentTime);
+    if (clickTimes.length === 2) transcriptPanel(document);
+  };
+  const task = harness(document, {
+    timeoutMs: 30_000,
+    tickMs: 100,
+    onTick(now) { currentTime = now; }
+  });
+
+  const result = await task.run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.deepEqual(clickTimes, [0, 2_000]);
+  assert.match(result.debugLog, /attempt 1\/3/);
+  assert.match(result.debugLog, /attempt 2\/3/);
+});
+
+test('stops after three unsuccessful clicks about two seconds apart without waiting forty-five seconds', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const wrapper = section.append(new FakeElement({ tag: 'ytd-button-renderer', text: 'Show transcript' }));
+  const actualButton = wrapper.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  const clickTimes = [];
+  let currentTime = 0;
+  actualButton.onClick = () => clickTimes.push(currentTime);
+  const result = await harness(document, {
+    timeoutMs: 45_000,
+    tickMs: 100,
+    onTick(now) { currentTime = now; }
+  }).run();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'panel-not-loaded');
+  assert.deepEqual(clickTimes, [0, 2_000, 4_000]);
+  assert.equal(result.elapsedMs, 6_000);
+  assert.match(result.debugLog, /attempt 3\/3/);
+  assert.match(result.debugLog, /three Show transcript button attempts/);
+});
 test('still clicks the Show transcript control if scrolling it throws', async () => {
   const document = new FakeDocument();
   const section = document.append(new FakeElement({ tag: 'section', text: 'Transcript Follow along using the transcript' }));
@@ -331,6 +450,91 @@ test('recognizes the older standalone transcript renderer layout', async () => {
   const result = await harness(document).run();
   assert.equal(result.ok, true);
   assert.equal(show.clickCount, 1);
+});
+
+test('preserves the safe clickable fallback for a label-only YouTube paper button', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const paperButton = section.append(new FakeElement({ tag: 'tp-yt-paper-button', text: 'Show transcript' }));
+  paperButton.onClick = () => { transcriptPanel(document); };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(paperButton.clickCount, 1);
+});
+
+test('ignores an unrelated engagement panel and retries Show transcript at two seconds', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const button = section.append(new FakeElement({ tag: 'button', text: 'Show transcript', ariaLabel: 'Show transcript' }));
+  let currentTime = 0;
+  const clicks = [];
+  let unrelatedTranscriptTab;
+  let actualTranscriptTab;
+  button.onClick = () => {
+    clicks.push(currentTime);
+    if (clicks.length === 1) {
+      const unrelatedPanel = document.append(new FakeElement({
+        tag: 'ytd-engagement-panel-section-list-renderer',
+        text: 'Unrelated panel',
+        attributes: { 'target-id': 'engagement-panel-comments-section' }
+      }));
+      unrelatedPanel.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Chapters', attributes: { 'aria-selected': 'true' } }));
+      unrelatedTranscriptTab = unrelatedPanel.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false' } }));
+    } else if (clicks.length === 2) {
+      const transcriptPanelElement = document.append(new FakeElement({
+        tag: 'ytd-engagement-panel-section-list-renderer',
+        text: 'In this video',
+        attributes: { 'target-id': 'engagement-panel-macro-markers-description-chapters' }
+      }));
+      transcriptPanelElement.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Chapters', attributes: { 'aria-selected': 'true' } }));
+      actualTranscriptTab = transcriptPanelElement.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false' } }));
+      actualTranscriptTab.onClick = () => {
+        actualTranscriptTab.attributes['aria-selected'] = 'true';
+        transcriptPanelElement.append(new FakeElement({ tag: 'ytd-transcript-segment-renderer', text: 'Loaded synthetic caption.' }));
+      };
+    }
+  };
+
+  const result = await harness(document, {
+    timeoutMs: 15_000,
+    tickMs: 100,
+    onTick(now) { currentTime = now; }
+  }).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.deepEqual(clicks, [0, 2_000]);
+  assert.equal(unrelatedTranscriptTab.clickCount, 0);
+  assert.equal(actualTranscriptTab.clickCount, 1);
+});
+
+test('recognizes a newly opened Chapters panel and switches it to Transcript', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript' }));
+  let transcriptTab;
+  show.onClick = () => {
+    const panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      text: 'In this video',
+      attributes: { 'target-id': 'engagement-panel-macro-markers-description-chapters' }
+    }));
+    panel.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Chapters', attributes: { 'aria-selected': 'true' } }));
+    transcriptTab = panel.append(new FakeElement({ tag: 'tp-yt-paper-tab', role: 'tab', text: 'Transcript', attributes: { 'aria-selected': 'false' } }));
+    transcriptTab.onClick = () => {
+      transcriptTab.attributes['aria-selected'] = 'true';
+      panel.append(new FakeElement({ tag: 'ytd-transcript-segment-renderer', text: 'Loaded synthetic caption.' }));
+    };
+  };
+
+  const result = await harness(document).run();
+
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(show.clickCount, 1);
+  assert.equal(transcriptTab.clickCount, 1);
+  assert.equal(result.progress.panelOpened, true);
+  assert.equal(result.progress.transcriptTabSelected, true);
 });
 
 test('waits for transcript rows when the Transcript tab is already selected without toggling it', async () => {
@@ -382,7 +586,14 @@ test('reports when Show transcript was clicked but its panel never loaded', asyn
   const document = new FakeDocument();
   const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
   const show = section.append(new FakeElement({ tag: 'button', text: 'Show transcript' }));
-  const result = await harness(document, { timeoutMs: 350, tickMs: 100 }).run();
+  const clickTimes = [];
+  let currentTime = 0;
+  show.onClick = () => clickTimes.push(currentTime);
+  const result = await harness(document, {
+    timeoutMs: 45_000,
+    tickMs: 100,
+    onTick(now) { currentTime = now; }
+  }).run();
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'panel-not-loaded');
   assert.deepEqual(result.progress, {
@@ -394,8 +605,11 @@ test('reports when Show transcript was clicked but its panel never loaded', asyn
     transcriptTabSelected: false,
     transcriptLinesLoaded: false
   });
-  assert.match(result.debugLog, /clicked Show transcript control/);
-  assert.equal(show.clickCount, 1);
+  assert.deepEqual(clickTimes, [0, 2_000, 4_000]);
+  assert.equal(result.elapsedMs, 6_000);
+  assert.match(result.debugLog, /clicked Show transcript button/);
+  assert.match(result.debugLog, /attempt 3\/3/);
+  assert.equal(show.clickCount, 3);
 });
 
 test('does not click controls while the page is still loading', async () => {

@@ -14,6 +14,8 @@
   const TRANSCRIPT_TAB_SELECTOR = 'button, [role="button"], [role="tab"], tp-yt-paper-tab, yt-tab-shape, yt-button-shape, ytd-button-renderer';
   const TRANSCRIPT_LINE_SELECTOR = 'ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment';
   const TRANSCRIPT_BUTTON_SEARCH_MS = 10_000;
+  const TRANSCRIPT_PANEL_RETRY_INTERVAL_MS = 2_000;
+  const MAX_TRANSCRIPT_BUTTON_ATTEMPTS = 3;
   const MAX_DEBUG_LOG_CHARS = 30_000;
   const MAX_DEBUG_EVENTS = 300;
   const MANUAL_ACTIONS = 'In the Chrome video tab, expand “...more” in the description if shown, scroll down to the Transcript section, and click the “Show transcript” button. If the “In this video” panel opens on “Chapters,” click its “Transcript” tab. Wait for transcript lines to appear, then try Get transcript again.';
@@ -69,6 +71,16 @@
     ].map(value => String(value).replace(/\s+/g, ' ').trim()).filter(Boolean))];
   }
 
+  function inViewport(node, document) {
+    const view = document?.defaultView;
+    const rect = node?.getBoundingClientRect?.();
+    if (!view || !rect || !(view.innerWidth > 0) || !(view.innerHeight > 0)) return false;
+    const width = Number(rect.width ?? (rect.right - rect.left));
+    const height = Number(rect.height ?? (rect.bottom - rect.top));
+    return width > 0 && height > 0 && rect.right > 0 && rect.bottom > 0 &&
+      rect.left < view.innerWidth && rect.top < view.innerHeight;
+  }
+
   function scrollIntoView(node) {
     try {
       node?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
@@ -114,7 +126,7 @@
   function findClickableAncestor(node, boundary) {
     let candidate = node;
     while (candidate && candidate !== boundary) {
-      if (candidate.matches?.(CONTROL_SELECTOR)) return candidate;
+      if (candidate.matches?.('button, [role="button"], tp-yt-paper-button')) return candidate;
       const parent = candidate.parentElement;
       if (parent) {
         candidate = parent;
@@ -122,26 +134,43 @@
         candidate = candidate.getRootNode?.()?.host ?? null;
       }
     }
-    return node;
+    return null;
   }
 
   function findShowTranscriptButton(document, section = findTranscriptSection(document)) {
-    const sectionElements = section ? allElements(section) : [];
-    const pageElements = allElements(document);
-    const sectionMatches = sectionElements.filter(node => visible(node, document) && hasShowTranscriptLabel(node));
-    const pageMatches = pageElements.filter(node => visible(node, document) && hasShowTranscriptLabel(node));
-    const matches = [...new Set(sectionMatches.length ? sectionMatches : pageMatches)];
-    const targets = matches.map(node => findClickableAncestor(node, document));
-    const uniqueTargets = [...new Set(targets)].filter(node => visible(node, document));
-    uniqueTargets.sort((left, right) => {
-      const leftInteractive = left.matches?.(CONTROL_SELECTOR) ? 0 : 1;
-      const rightInteractive = right.matches?.(CONTROL_SELECTOR) ? 0 : 1;
-      if (leftInteractive !== rightInteractive) return leftInteractive - rightInteractive;
-      const leftLength = Math.min(...labels(left).map(value => value.length), Number.MAX_SAFE_INTEGER);
-      const rightLength = Math.min(...labels(right).map(value => value.length), Number.MAX_SAFE_INTEGER);
-      return leftLength - rightLength;
-    });
-    return uniqueTargets[0] ?? null;
+    const scopes = [];
+    if (section && visible(section, document)) scopes.push(section);
+    if (!scopes.includes(document)) scopes.push(document);
+
+    for (const scope of scopes) {
+      const directControls = allElements(scope).filter(node =>
+        visible(node, document) &&
+        node.matches?.('button, [role="button"], tp-yt-paper-button') &&
+        hasShowTranscriptLabel(node)
+      );
+      if (directControls.length) {
+        directControls.sort((left, right) => {
+          const leftViewport = inViewport(left, document) ? 0 : 1;
+          const rightViewport = inViewport(right, document) ? 0 : 1;
+          if (leftViewport !== rightViewport) return leftViewport - rightViewport;
+          const leftNative = left.matches?.('button') ? 0 : 1;
+          const rightNative = right.matches?.('button') ? 0 : 1;
+          return leftNative - rightNative || labels(left).join(' ').length - labels(right).join(' ').length;
+        });
+        return directControls[0];
+      }
+    }
+
+    for (const scope of scopes) {
+      const labelledContainers = allElements(scope).filter(node =>
+        visible(node, document) && hasShowTranscriptLabel(node)
+      );
+      for (const container of labelledContainers) {
+        const clickable = findClickableAncestor(container, document);
+        if (clickable) return clickable;
+      }
+    }
+    return null;
   }
 
   function findTranscriptTab(panel) {
@@ -164,13 +193,43 @@
     return nodes(panel, TRANSCRIPT_LINE_SELECTOR).some(node => visible(node, panel));
   }
 
+  function isTranscriptRelatedEngagementPanel(panel) {
+    const targetID = panel?.getAttribute?.('target-id') ?? panel?.getAttribute?.('targetId') ?? '';
+    if (targetID) return /transcript|macro-markers-description-chapters/i.test(targetID);
+    return labels(panel).some(value => /\bin this video\b/i.test(value));
+  }
+
   function findTranscriptPanel(document) {
     const dedicatedPanel = nodes(document, TRANSCRIPT_PANEL_SELECTOR).find(node => visible(node, document));
     if (dedicatedPanel) return dedicatedPanel;
-    const engagementPanels = nodes(document, ENGAGEMENT_PANEL_SELECTOR).filter(node => visible(node, document));
-    return engagementPanels.find(node =>
-      findTranscriptTab(node) || /transcript/i.test(node.getAttribute?.('target-id') ?? node.getAttribute?.('targetId') ?? '')
-    ) ?? null;
+    const engagementPanels = nodes(document, ENGAGEMENT_PANEL_SELECTOR).filter(panel =>
+      visible(panel, document) && isTranscriptRelatedEngagementPanel(panel)
+    );
+    return engagementPanels.find(node => {
+      const targetID = node.getAttribute?.('target-id') ?? node.getAttribute?.('targetId') ?? '';
+      if (/transcript/i.test(targetID)) return true;
+      const transcriptTab = findTranscriptTab(node);
+      return Boolean(transcriptTab && transcriptTabIsSelected(transcriptTab));
+    }) ?? null;
+  }
+
+  function engagementPanelState(panel) {
+    const targetID = panel.getAttribute?.('target-id') ?? panel.getAttribute?.('targetId') ?? '';
+    const transcriptTab = findTranscriptTab(panel);
+    return `${targetID}|${transcriptTab ? transcriptTabIsSelected(transcriptTab) : false}`;
+  }
+
+  function captureEngagementPanelStates(document) {
+    return new Map(nodes(document, ENGAGEMENT_PANEL_SELECTOR)
+      .filter(panel => visible(panel, document) && findTranscriptTab(panel))
+      .map(panel => [panel, engagementPanelState(panel)]));
+  }
+
+  function findEngagementPanelOpenedSince(document, previousStates) {
+    return nodes(document, ENGAGEMENT_PANEL_SELECTOR).find(panel => {
+      if (!visible(panel, document) || !isTranscriptRelatedEngagementPanel(panel) || !findTranscriptTab(panel)) return false;
+      return !previousStates.has(panel) || previousStates.get(panel) !== engagementPanelState(panel);
+    }) ?? null;
   }
 
   function progressSnapshot(progress) {
@@ -187,7 +246,8 @@
       ariaLabel: String(node?.getAttribute?.('aria-label') ?? '').slice(0, 180),
       title: String(node?.getAttribute?.('title') ?? '').slice(0, 120),
       labels: values.slice(0, 4).map(value => value.slice(0, 180)),
-      visible: document ? visible(node, document) : Boolean(node && node.isConnected !== false && !node.hidden && node.getAttribute?.('aria-hidden') !== 'true')
+      visible: document ? visible(node, document) : Boolean(node && node.isConnected !== false && !node.hidden && node.getAttribute?.('aria-hidden') !== 'true'),
+      inViewport: document ? inViewport(node, document) : null
     };
   }
 
@@ -268,6 +328,10 @@
     let lastReadyState = null;
     let pollCount = 0;
     let transcriptButtonSearchDeadline = null;
+    let transcriptButtonAttempts = 0;
+    let nextTranscriptPanelCheckAt = null;
+    let lastTranscriptButton = null;
+    let panelStatesBeforeFirstButtonClick = null;
     const record = (event, details = null) => {
       const elapsed = Math.max(0, now() - startedAt);
       const suffix = details === null ? '' : ` ${JSON.stringify(details)}`;
@@ -333,7 +397,13 @@
         continue;
       }
 
-      const transcriptPanel = findTranscriptPanel(document);
+      let transcriptPanel = findTranscriptPanel(document);
+      if (!transcriptPanel && transcriptButtonAttempts > 0 && panelStatesBeforeFirstButtonClick) {
+        transcriptPanel = findEngagementPanelOpenedSince(document, panelStatesBeforeFirstButtonClick);
+        if (transcriptPanel) {
+          record('new In this video panel appeared after Show transcript click', describePanel(transcriptPanel, document));
+        }
+      }
       if (transcriptPanel && hasTranscriptLines(transcriptPanel)) {
         if (!progress.panelOpened) record('transcript panel opened and transcript rows observed', inspectPage(document, ready).openPanels);
         progress.panelOpened = true;
@@ -360,7 +430,7 @@
         };
       }
 
-      if (progress.transcriptButtonClicked) {
+      if (transcriptButtonAttempts > 0) {
         if (transcriptPanel) {
           if (!progress.panelOpened) record('transcript panel appeared after Show transcript click', inspectPage(document, ready).openPanels);
           progress.panelOpened = true;
@@ -390,8 +460,58 @@
               progress: progressSnapshot(progress), debugLog: debugLog(), elapsedMs: now() - startedAt
             };
           }
+          await sleep(pollIntervalMs);
+          continue;
         }
-        await sleep(pollIntervalMs);
+
+        if (nextTranscriptPanelCheckAt !== null && now() >= nextTranscriptPanelCheckAt) {
+          if (transcriptButtonAttempts >= MAX_TRANSCRIPT_BUTTON_ATTEMPTS) {
+            record('transcript panel did not open after three Show transcript button attempts', {
+              attempts: transcriptButtonAttempts,
+              retryIntervalMs: TRANSCRIPT_PANEL_RETRY_INTERVAL_MS
+            });
+            return {
+              ok: false,
+              reason: 'panel-not-loaded',
+              progress: progressSnapshot(progress),
+              debugLog: debugLog(),
+              elapsedMs: now() - startedAt
+            };
+          }
+          const section = findTranscriptSection(document);
+          const button = findShowTranscriptButton(document, section) ??
+            (lastTranscriptButton && visible(lastTranscriptButton, document) ? lastTranscriptButton : null);
+          if (!button) {
+            record('cannot retry Show transcript because its visible button is no longer available', {
+              attempts: transcriptButtonAttempts,
+              lastButton: lastTranscriptButton ? describeControl(lastTranscriptButton) : null
+            });
+            return {
+              ok: false,
+              reason: 'panel-not-loaded',
+              progress: progressSnapshot(progress),
+              debugLog: debugLog(),
+              elapsedMs: now() - startedAt
+            };
+          }
+          transcriptButtonAttempts += 1;
+          lastTranscriptButton = button;
+          scrollIntoView(button);
+          record(`clicked Show transcript button (attempt ${transcriptButtonAttempts}/${MAX_TRANSCRIPT_BUTTON_ATTEMPTS})`, describeControl(button, document));
+          try {
+            button.click();
+            progress.transcriptButtonClicked = true;
+          } catch (error) {
+            record('Show transcript button click threw', { attempt: transcriptButtonAttempts, error: String(error).slice(0, 240) });
+          }
+          nextTranscriptPanelCheckAt = now() + TRANSCRIPT_PANEL_RETRY_INTERVAL_MS;
+          continue;
+        }
+
+        const retryDelay = nextTranscriptPanelCheckAt === null
+          ? pollIntervalMs
+          : Math.min(pollIntervalMs, Math.max(1, nextTranscriptPanelCheckAt - now()));
+        await sleep(retryDelay);
         continue;
       }
 
@@ -432,20 +552,28 @@
       if (transcriptButton) {
         if (!progress.transcriptButtonFound) {
           progress.transcriptButtonFound = true;
-          record('Show transcript button found', describeControl(transcriptButton));
+          record('Show transcript button found', describeControl(transcriptButton, document));
         }
         if (searchWindowExpired) {
-          record('Show transcript button appeared after the search window; not clicking it', describeControl(transcriptButton));
+          record('Show transcript button appeared after the search window; not clicking it', describeControl(transcriptButton, document));
         } else {
+          if (panelStatesBeforeFirstButtonClick === null) {
+            panelStatesBeforeFirstButtonClick = captureEngagementPanelStates(document);
+            record('captured panel state before Show transcript click', [...panelStatesBeforeFirstButtonClick].map(([panel, state]) => ({
+              ...describePanel(panel, document), state
+            })));
+          }
+          transcriptButtonAttempts += 1;
+          lastTranscriptButton = transcriptButton;
+          scrollIntoView(transcriptButton);
+          record(`clicked Show transcript button (attempt ${transcriptButtonAttempts}/${MAX_TRANSCRIPT_BUTTON_ATTEMPTS})`, describeControl(transcriptButton, document));
           try {
-            scrollIntoView(transcriptButton);
-            record('clicked Show transcript control', describeControl(transcriptButton));
             transcriptButton.click();
             progress.transcriptButtonClicked = true;
           } catch (error) {
-            record('Show transcript click threw; will retry', { control: describeControl(transcriptButton), error: String(error).slice(0, 240) });
+            record('Show transcript button click threw', { attempt: transcriptButtonAttempts, error: String(error).slice(0, 240) });
           }
-          await sleep(pollIntervalMs);
+          nextTranscriptPanelCheckAt = now() + TRANSCRIPT_PANEL_RETRY_INTERVAL_MS;
           continue;
         }
       }
