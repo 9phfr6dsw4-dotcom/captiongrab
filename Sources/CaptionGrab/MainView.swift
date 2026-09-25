@@ -194,8 +194,8 @@ struct MainView: View {
     private func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
         guard let provider = providers.first else { return false }
         if provider.canLoadObject(ofClass: URL.self) {
-            provider.loadObject(ofClass: URL.self) { object, _ in
-                guard let url = object as? URL else { return }
+            _ = provider.loadObject(ofClass: URL.self) { object, _ in
+                guard let url = object else { return }
                 Task { @MainActor in model.inputURL = url.absoluteString }
             }
             return true
