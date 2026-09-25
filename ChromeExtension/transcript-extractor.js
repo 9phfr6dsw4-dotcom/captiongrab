@@ -7,7 +7,7 @@
 
   const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
-  const TRANSCRIPT_CUE_SELECTOR = 'ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment';
+  const TRANSCRIPT_CUE_SELECTOR = 'ytd-transcript-segment-renderer, yt-transcript-segment-renderer, .transcript-segment, transcript-segment-view-model';
 
   function parseTimestamp(value) {
     if (typeof value !== 'string') return null;
@@ -41,7 +41,24 @@
 
   function extractTranscriptCues(panel) {
     const rows = domElements(panel).filter(node => matchesDOM(node, TRANSCRIPT_CUE_SELECTOR));
-    return extractCues(rows);
+    const legacyRows = rows.filter(node => !matchesDOM(node, 'transcript-segment-view-model'));
+    const modernRows = rows.filter(node => matchesDOM(node, 'transcript-segment-view-model'));
+    const modernCues = [];
+    for (const row of modernRows) {
+      if (!isVisibleDOM(row, panel?.ownerDocument)) continue;
+      const descendants = domElements(row);
+      const timestamp = descendants.find(node =>
+        node !== row && matchesDOM(node, 'div') && parseTimestamp(nodeText(node)) !== null
+      );
+      const textNode = descendants.find(node => matchesDOM(node, 'span') && node.getAttribute?.('role') === 'text');
+      const startTimeMilliseconds = parseTimestamp(nodeText(timestamp));
+      const text = String(textNode?.innerText ?? textNode?.textContent ?? '').replace(/\r\n?/g, '\n').trim();
+      if (startTimeMilliseconds !== null && text) modernCues.push({ startTimeMilliseconds, text });
+    }
+    const legacyCues = extractCues(legacyRows);
+    return panel?.getAttribute?.('target-id') === 'PAmodern_transcript_view'
+      ? modernCues.length ? modernCues : legacyCues
+      : legacyCues.length ? legacyCues : modernCues;
   }
 
   function choosePreferredEnglishLanguage(availableLanguages) {

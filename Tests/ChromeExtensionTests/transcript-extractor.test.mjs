@@ -208,6 +208,55 @@ test('extracts transcript cue rows from the modern panel shadow root', () => {
   ]);
 });
 
+test('extracts timestamped modern timeline captions and skips chapter headings', () => {
+  const panel = new FakeDOMNode({ tag: 'ytd-engagement-panel-section-list-renderer' });
+  const chapter = panel.append(new FakeDOMNode({ tag: 'macro-markers-panel-item-view-model', role: 'button' }));
+  chapter.append(new FakeDOMNode({ tag: 'timeline-chapter-view-model' })).append(new FakeDOMNode({ tag: 'h3', text: 'Chapter title' }));
+  const item = panel.append(new FakeDOMNode({ tag: 'macro-markers-panel-item-view-model', role: 'button' }));
+  const timeline = item.append(new FakeDOMNode({ tag: 'timeline-item-view-model' }));
+  const container = timeline.append(new FakeDOMNode({ tag: 'div' }));
+  const segment = container.append(new FakeDOMNode({ tag: 'transcript-segment-view-model' }));
+  segment.append(new FakeDOMNode({ tag: 'div', text: '1:23' }));
+  segment.append(new FakeDOMNode({ tag: 'div', text: 'not a timestamp' }));
+  segment.append(new FakeDOMNode({ tag: 'span', role: 'text', text: 'Synthetic modern caption.\nSecond line.' }));
+
+  assert.deepEqual(extractor.extractTranscriptCues(panel), [
+    { startTimeMilliseconds: 83_000, text: 'Synthetic modern caption.\nSecond line.' }
+  ]);
+});
+
+test('does not treat modern chapter headings or timestampless captions as cues', () => {
+  const panel = new FakeDOMNode({ tag: 'ytd-engagement-panel-section-list-renderer' });
+  const chapter = panel.append(new FakeDOMNode({ tag: 'macro-markers-panel-item-view-model' }));
+  chapter.append(new FakeDOMNode({ tag: 'timeline-chapter-view-model' })).append(new FakeDOMNode({ tag: 'h3', text: '1:23' }));
+  const segment = panel.append(new FakeDOMNode({ tag: 'transcript-segment-view-model' }));
+  segment.append(new FakeDOMNode({ tag: 'div', text: 'not a time' }));
+  segment.append(new FakeDOMNode({ tag: 'span', role: 'text', text: '1:23 happens in this caption.' }));
+  assert.deepEqual(extractor.extractTranscriptCues(panel), []);
+});
+
+test('does not extract a modern cue when its timeline row is hidden', () => {
+  const panel = new FakeDOMNode({ tag: 'ytd-engagement-panel-section-list-renderer' });
+  const item = panel.append(new FakeDOMNode({ tag: 'macro-markers-panel-item-view-model' }));
+  item.hidden = true;
+  const segment = item.append(new FakeDOMNode({ tag: 'transcript-segment-view-model' }));
+  segment.append(new FakeDOMNode({ tag: 'div', text: '1:23' }));
+  segment.append(new FakeDOMNode({ tag: 'span', role: 'text', text: 'Hidden caption.' }));
+  assert.deepEqual(extractor.extractTranscriptCues(panel), []);
+});
+
+test('does not duplicate an available modern cue from a legacy renderer in the same panel', () => {
+  const panel = new FakeDOMNode({ tag: 'ytd-engagement-panel-section-list-renderer', attributes: { 'target-id': 'PAmodern_transcript_view' } });
+  const legacy = panel.append(new FakeDOMNode({ tag: 'ytd-transcript-segment-renderer' }));
+  legacy.querySelector = selector => selector.includes('timestamp') ? element('1:23') : element('Same caption.');
+  const segment = panel.append(new FakeDOMNode({ tag: 'transcript-segment-view-model' }));
+  segment.append(new FakeDOMNode({ tag: 'div', text: '1:23' }));
+  segment.append(new FakeDOMNode({ tag: 'span', role: 'text', text: 'Same caption.' }));
+  assert.deepEqual(extractor.extractTranscriptCues(panel), [
+    { startTimeMilliseconds: 83_000, text: 'Same caption.' }
+  ]);
+});
+
 test('rejects empty and malformed transcript segments', () => {
   assert.deepEqual(extractor.extractCues([segment('0:01', '  \n  ')]), []);
   assert.deepEqual(extractor.extractCues([segment('bad', 'Synthetic text')]), []);
@@ -306,6 +355,28 @@ test('content script sends regular English captions and logs available and selec
   assert.match(message.debugLog, /Français/);
   assert.ok(message.debugLog.includes('"previouslySelectedLanguage":"English (auto-generated)"'));
   assert.ok(message.debugLog.includes('"selectedLanguage":"English"'));
+});
+
+test('content script sends timestamped modern-panel captions after confirming English', async () => {
+  const fixture = languageMenuFixture(['English (auto-generated)', 'English'], 'English');
+  const oldRow = fixture.panel.querySelectorAll('ytd-transcript-segment-renderer')[0];
+  fixture.panel.children = fixture.panel.children.filter(child => child !== oldRow);
+  fixture.panel.tagName = 'YTD-ENGAGEMENT-PANEL-SECTION-LIST-RENDERER';
+  fixture.panel.attributes['target-id'] = 'PAmodern_transcript_view';
+  const item = fixture.panel.append(new FakeDOMNode({ tag: 'macro-markers-panel-item-view-model', role: 'button' }));
+  const segment = item.append(new FakeDOMNode({ tag: 'timeline-item-view-model' }))
+    .append(new FakeDOMNode({ tag: 'transcript-segment-view-model' }));
+  segment.append(new FakeDOMNode({ tag: 'div', text: '0:00' }));
+  segment.append(new FakeDOMNode({ tag: 'div' }));
+  segment.append(new FakeDOMNode({ tag: 'span', role: 'text', text: 'Synthetic modern English caption.' }));
+
+  const message = await runContentCapture(fixture);
+  assert.equal(message.type, 'captiongrab.transcript');
+  assert.equal(message.isAutoGenerated, false);
+  assert.deepEqual(message.cues.map(cue => cue.text), ['Synthetic modern English caption.']);
+  assert.match(message.debugLog, /"selectedLanguage":"English"/);
+  assert.match(message.debugLog, /"reason":null/);
+  assert.equal(fixture.trigger.clickCount, 1);
 });
 
 test('content script marks and logs auto-generated captions only as the fallback', async () => {
@@ -451,7 +522,7 @@ test('extension manifest requests only the YouTube page and native-messaging per
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.permissions, ['nativeMessaging']);
   assert.deepEqual(manifest.host_permissions, ['https://www.youtube.com/*']);
-  assert.equal(manifest.version, '1.2.10');
+  assert.equal(manifest.version, '1.2.11');
   assert.deepEqual(manifest.content_scripts[0].js, ['transcript-extractor.js', 'transcript-panel-opener.js', 'content.js']);
   const panelOpenerSource = await readFile(path.join(root, 'ChromeExtension/transcript-panel-opener.js'), 'utf8');
   assert.ok(panelOpenerSource.includes('Show transcript'));

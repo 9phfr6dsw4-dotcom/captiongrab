@@ -11,9 +11,9 @@
     <key>CFBundleIconFile</key>
     <string>CaptionGrab</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.12</string>
+    <string>1.2.13</string>
     <key>CFBundleVersion</key>
-    <string>16</string>
+    <string>17</string>
     <key>CFBundleIdentifier</key>
     <string>com.captiongrab.app</string>
     <key>CFBundleInfoDictionaryVersion</key>

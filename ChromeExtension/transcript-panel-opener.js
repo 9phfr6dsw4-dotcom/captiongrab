@@ -324,8 +324,10 @@
       classTokens.some(token => token === 'selected' || token.endsWith('--selected') || token === 'active' || token.endsWith('--active'));
   }
 
-  function hasTranscriptLines(panel) {
-    return nodesIncludingShadow(panel, TRANSCRIPT_LINE_SELECTOR).some(node => visible(node, panel));
+  function hasTranscriptLines(panel, extractTranscriptCues = null) {
+    if (nodesIncludingShadow(panel, TRANSCRIPT_LINE_SELECTOR).some(node => visible(node, panel))) return true;
+    return panel?.getAttribute?.('target-id') === 'PAmodern_transcript_view' &&
+      typeof extractTranscriptCues === 'function' && extractTranscriptCues(panel).length > 0;
   }
 
   function panelStructure(panel) {
@@ -496,7 +498,8 @@
     now = () => Date.now(),
     timeoutMs = 45_000,
     pollIntervalMs = 300,
-    transcriptButtonTimeoutMs = TRANSCRIPT_BUTTON_SEARCH_MS
+    transcriptButtonTimeoutMs = TRANSCRIPT_BUTTON_SEARCH_MS,
+    extractTranscriptCues = globalThis.CaptionGrabExtractor?.extractTranscriptCues
   } = {}) {
     const startedAt = now();
     const debugEvents = [];
@@ -583,7 +586,7 @@
       let transcriptPanel = findTranscriptPanel(document);
       if (pendingTabClick) {
         const selected = transcriptTabIsSelected(pendingTabClick.tab);
-        const rowsLoaded = hasTranscriptLines(pendingTabClick.panel);
+        const rowsLoaded = hasTranscriptLines(pendingTabClick.panel, extractTranscriptCues);
         progress.transcriptTabSelected = selected;
         record('Transcript tab click outcome', {
           selected,
@@ -612,7 +615,7 @@
           nextPanelStructureAt = now() + (structure.itemCount ? 5_000 : 1_000);
         }
       }
-      if (transcriptPanel && hasTranscriptLines(transcriptPanel)) {
+      if (transcriptPanel && hasTranscriptLines(transcriptPanel, extractTranscriptCues)) {
         if (!progress.panelOpened) record('transcript panel opened and transcript rows observed', inspectPage(document, ready).openPanels);
         progress.panelOpened = true;
         const transcriptTab = findTranscriptTab(transcriptPanel, document);
@@ -664,7 +667,7 @@
             progress.transcriptTabSelected = true;
             record('Transcript tab is selected', describeControl(transcriptTab));
           }
-          if (hasTranscriptLines(transcriptPanel)) {
+          if (hasTranscriptLines(transcriptPanel, extractTranscriptCues)) {
             progress.transcriptLinesLoaded = true;
             record('transcript lines loaded', { panel: describePanel(transcriptPanel, document), transcriptTabSelected: progress.transcriptTabSelected });
             return {
@@ -829,7 +832,7 @@
       record('Transcript tab final state', {
         elapsedSinceClickMs: now() - lastTabClick.at,
         selected: transcriptTabIsSelected(lastTabClick.tab),
-        rowsLoaded: hasTranscriptLines(lastTabClick.panel),
+        rowsLoaded: hasTranscriptLines(lastTabClick.panel, extractTranscriptCues),
         tabConnected: lastTabClick.tab.isConnected !== false,
         panelConnected: lastTabClick.panel.isConnected !== false
       });

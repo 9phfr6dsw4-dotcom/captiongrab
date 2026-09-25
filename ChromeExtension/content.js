@@ -125,6 +125,7 @@
       document
     });
     const debugLog = appendDebugEvent(panelResult.debugLog, 'transcript language selection', {
+      reason: languageSelection.reason,
       availableLanguages: languageSelection.availableLanguages,
       previouslySelectedLanguage: languageSelection.currentlySelectedLanguage,
       selectedLanguage: languageSelection.selectedLanguage,

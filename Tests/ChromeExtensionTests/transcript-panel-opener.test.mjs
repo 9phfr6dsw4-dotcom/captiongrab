@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const imported = await import(path.join(root, 'ChromeExtension/transcript-panel-opener.js'));
 const opener = imported.default ?? imported;
+const importedExtractor = await import(path.join(root, 'ChromeExtension/transcript-extractor.js'));
+const extractor = importedExtractor.default ?? importedExtractor;
 
 class FakeElement {
   constructor({ tag = 'button', id = '', role = '', text = '', ariaLabel = '', attributes = {}, onClick = null } = {}) {
@@ -96,6 +98,7 @@ function harness(document, { timeoutMs = 3_000, tickMs = 100, onTick = () => {},
   return {
     run: () => opener.openTranscriptPanel({
       document,
+      extractTranscriptCues: extractor.extractTranscriptCues,
       timeoutMs,
       pollIntervalMs: tickMs,
       now: () => currentTime,
@@ -718,7 +721,7 @@ test('selects the only unlinked Transcript tab when a modern panel opens on chap
   assert.doesNotMatch(result.debugLog, /Synthetic caption line/);
 });
 
-test('logs modern panel structure without caption text when the Transcript tab belongs to another panel', async () => {
+test('reads modern panel captions without clicking a Transcript tab belonging to another panel', async () => {
   const document = new FakeDocument();
   const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
   const show = section.append(new FakeElement({ tag: 'button', ariaLabel: 'Show transcript' }));
@@ -733,22 +736,45 @@ test('logs modern panel structure without caption text when the Transcript tab b
       attributes: { 'target-id': 'PAmodern_transcript_view' }
     }));
     const item = panel.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model' }));
-    const segment = item.append(new FakeElement({ tag: 'transcript-segment-view-model', text: 'private caption content' }));
-    const shadowRoot = new FakeElement({ tag: 'shadow-root' });
-    shadowRoot.host = segment;
-    segment.shadowRoot = shadowRoot;
-    shadowRoot.append(new FakeElement({ tag: 'span', text: 'private caption content' }));
+    const timeline = item.append(new FakeElement({ tag: 'timeline-item-view-model' }));
+    const segment = timeline.append(new FakeElement({ tag: 'transcript-segment-view-model' }));
+    segment.append(new FakeElement({ tag: 'div', text: '1:23' }));
+    segment.append(new FakeElement({ tag: 'div' }));
+    segment.append(new FakeElement({ tag: 'span', role: 'text', text: 'private caption content' }));
   };
 
   const result = await harness(document, { timeoutMs: 1_000 }).run();
-  assert.equal(result.reason, 'panel-not-loaded');
+  assert.equal(result.ok, true, result.debugLog);
+  assert.equal(result.progress.transcriptLinesLoaded, true);
   assert.match(result.debugLog, /Transcript tab candidates.*"ancestorPanels":\["other"\]/);
   assert.match(result.debugLog, /Transcript panel structure.*"itemCount":1/);
   assert.match(result.debugLog, /Transcript panel structure.*"tag":"transcript-segment-view-model"/);
-  assert.match(result.debugLog, /Transcript panel final structure.*"itemCount":1/);
-  assert.match(result.debugLog, /Transcript panel final structure.*"tag":"span"/);
   assert.doesNotMatch(result.debugLog, /private caption content/);
   assert.equal(unrelatedTab.clickCount, 0);
+  assert.deepEqual(extractor.extractTranscriptCues(result.panel), [
+    { startTimeMilliseconds: 83_000, text: 'private caption content' }
+  ]);
+});
+
+test('does not claim hidden modern captions are loaded', async () => {
+  const document = new FakeDocument();
+  const section = document.append(new FakeElement({ tag: 'ytd-video-description-transcript-section-renderer' }));
+  const show = section.append(new FakeElement({ tag: 'button', ariaLabel: 'Show transcript' }));
+  show.onClick = () => {
+    const panel = document.append(new FakeElement({
+      tag: 'ytd-engagement-panel-section-list-renderer',
+      attributes: { 'target-id': 'PAmodern_transcript_view' }
+    }));
+    const item = panel.append(new FakeElement({ tag: 'macro-markers-panel-item-view-model' }));
+    item.hidden = true;
+    const segment = item.append(new FakeElement({ tag: 'transcript-segment-view-model' }));
+    segment.append(new FakeElement({ tag: 'div', text: '1:23' }));
+    segment.append(new FakeElement({ tag: 'span', role: 'text', text: 'Hidden caption.' }));
+  };
+  const result = await harness(document, { timeoutMs: 1_000 }).run();
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'panel-not-loaded');
+  assert.equal(result.progress.transcriptLinesLoaded, false);
 });
 
 test('logs whether an unlinked Transcript tab click loaded rows rather than silently timing out', async () => {
