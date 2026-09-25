@@ -9,11 +9,32 @@ public enum ChromeCompanionConstants {
     public static let requestQueryName = "captiongrab_request"
     public static let chromeFolderBookmarkKey = "CaptionGrab.chromeNativeMessagingFolderBookmark"
 
-    public static func chromeProfileDirectory(homeURL: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
-        homeURL.appendingPathComponent("Library/Application Support/Google/Chrome", isDirectory: true)
+    // Look up the account home explicitly; NSHomeDirectory() can be redirected to a sandbox container.
+    public static func currentUserHomeDirectory(fileManager: FileManager = .default) -> URL {
+        let userName = NSUserName()
+        if let accountHome = fileManager.homeDirectory(forUser: userName) {
+            return accountHome
+        }
+        if let accountHomePath = NSHomeDirectoryForUser(userName) {
+            return URL(fileURLWithPath: accountHomePath, isDirectory: true)
+        }
+        return fileManager.homeDirectoryForCurrentUser
     }
 
-    public static func chromeNativeMessagingDirectory(homeURL: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+    public static func canonicalFileURL(_ url: URL) -> URL {
+        url.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    public static func chromeProfileDirectory(homeURL: URL? = nil) -> URL {
+        (homeURL ?? currentUserHomeDirectory())
+            .appendingPathComponent("Library/Application Support/Google/Chrome", isDirectory: true)
+    }
+
+    public static func isChromeProfileDirectory(selectedURL: URL, homeURL: URL? = nil) -> Bool {
+        canonicalFileURL(selectedURL) == canonicalFileURL(chromeProfileDirectory(homeURL: homeURL))
+    }
+
+    public static func chromeNativeMessagingDirectory(homeURL: URL? = nil) -> URL {
         chromeNativeMessagingDirectory(chromeRootURL: chromeProfileDirectory(homeURL: homeURL))
     }
 
@@ -21,7 +42,7 @@ public enum ChromeCompanionConstants {
         chromeRootURL.appendingPathComponent("NativeMessagingHosts", isDirectory: true)
     }
 
-    public static func inboxDirectory(homeURL: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+    public static func inboxDirectory(homeURL: URL? = nil) -> URL {
         inboxDirectory(chromeRootURL: chromeProfileDirectory(homeURL: homeURL))
     }
 

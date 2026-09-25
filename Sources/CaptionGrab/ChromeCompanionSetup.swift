@@ -38,7 +38,7 @@ private enum ChromeCompanionSetupError: Error, LocalizedError {
 
 enum ChromeCompanionSetup {
     private static var expectedChromeRoot: URL {
-        ChromeCompanionConstants.chromeProfileDirectory().standardizedFileURL
+        ChromeCompanionConstants.canonicalFileURL(ChromeCompanionConstants.chromeProfileDirectory())
     }
 
     static func savedChromeRoot() -> URL? {
@@ -49,7 +49,8 @@ enum ChromeCompanionSetup {
             options: [.withSecurityScope, .withoutUI],
             relativeTo: nil,
             bookmarkDataIsStale: &stale
-        ), !stale, folder.standardizedFileURL == expectedChromeRoot else { return nil }
+        ), !stale,
+           ChromeCompanionConstants.canonicalFileURL(folder) == expectedChromeRoot else { return nil }
         return folder
     }
 
@@ -105,7 +106,7 @@ enum ChromeCompanionSetup {
             panel.directoryURL = expectedChromeRoot
             guard panel.runModal() == .OK, let selected = panel.url else { return nil }
             scopedURLToStop = selected
-            guard selected.standardizedFileURL == expectedChromeRoot else {
+            guard ChromeCompanionConstants.isChromeProfileDirectory(selectedURL: selected) else {
                 throw ChromeCompanionSetupError.wrongChromeFolder
             }
             chromeRoot = selected
