@@ -29,7 +29,7 @@ final class CaptionGrabInstallationLocatorTests: XCTestCase {
             expectedBuildVersion: buildVersion
         )
 
-        XCTAssertEqual(resolved, runningURL.standardizedFileURL)
+        XCTAssertEqual(resolved?.path, runningURL.standardizedFileURL.path)
     }
 
     func testFindsMatchingStableLaunchServicesInstallationAndSkipsWrongOrTranslocatedCopies() throws {
