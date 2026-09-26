@@ -8,7 +8,7 @@
 
 <p align="center"><a href="https://github.com/9phfr6dsw4-dotcom/captiongrab/releases/latest"><strong>Download the latest release</strong></a> · macOS 26+</p>
 
-<p align="center"><img src="docs/images/captiongrab-window.png" alt="CaptionGrab with a sample YouTube URL and a recent demo video" width="820"></p>
+<p align="center"><img src="docs/images/captiongrab-window.png" alt="CaptionGrab displaying a fetched YouTube transcript" width="820"></p>
 
 ## Features
 
