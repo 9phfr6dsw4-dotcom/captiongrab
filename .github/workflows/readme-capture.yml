@@ -1,0 +1,46 @@
+name: Capture CaptionGrab v1.2.17 app window
+
+'on':
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: Public synthetic YouTube video URL with visible English captions only
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    if: github.repository == '9phfr6dsw4-dotcom/captiongrab'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Fail unless the selected dispatch ref is main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          printf '%s\n' 'Refusing capture: select the main branch.' >&2
+          exit 1
+
+      - name: Check out the main-branch workflow without persisting credentials
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Run workflow safety and input tests
+        run: python3 -m unittest discover -s Tests/WorkflowTests -p 'test_*.py' -v
+
+      - name: Download verified release and capture the loaded app window
+        run: bash Scripts/capture-readme-window.sh
+        env:
+          CAPTIONGRAB_VIDEO_URL: ${{ inputs.video_url }}
+
+      - name: Upload the fresh app-window capture
+        uses: actions/upload-artifact@v7
+        with:
+          name: captiongrab-v1.2.17-app-window
+          path: ${{ runner.temp }}/captiongrab-readme/captiongrab-window.png
+          if-no-files-found: error
+          retention-days: 7
