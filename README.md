@@ -21,7 +21,7 @@
 
 - Paste or drop a YouTube link. Direct retrieval looks for English captions, preferring creator-made captions and then auto-generated English captions when available.
 - See the caption type when known, then copy the transcript or export it as Markdown or Word (`.docx`). Directly retrieved caption cue order and explicit line breaks are preserved.
-- If direct retrieval is blocked, the optional Chrome companion can capture the transcript shown in YouTube's panel on the matching video page. Its language or track type may be unknown, and the extension does not request cookie access.
+- If direct retrieval fails, the optional Chrome companion can capture the transcript shown in YouTube's panel on the matching video page. Its language or track type may be unknown, and the extension does not request cookie access.
 - If CaptionGrab cannot parse an unfamiliar transcript layout, Apple Foundation Models can try on-device recovery. The output is checked against visible text and timestamps and marked for review, but it may omit captions or group lines incorrectly.
 - Clear or replace a link without losing the current transcript or recent-video list.
 - Keep a recent-video list on your Mac and clear it whenever you like.
