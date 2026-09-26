@@ -126,7 +126,7 @@ private func focusAndSetYouTubeLinkField(to videoURL: String) {
         fail("CaptionGrab is not running; cannot locate its accessible YouTube link field.")
     }
 
-    _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+    _ = app.activate(options: [.activateAllWindows])
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
     guard let windows = attribute(appElement, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
         fail("CaptionGrab's main window is unavailable through Accessibility.")
@@ -167,7 +167,7 @@ private func focusAndSetYouTubeLinkField(to videoURL: String) {
 
     var hasKeyboardFocus = false
     for _ in 0..<10 {
-        if let focusedElement = attribute(appElement, kAXFocusedUIElementAttribute) as? AXUIElement,
+        if let focusedElement = attribute(appElement, kAXFocusedUIElementAttribute),
            CFEqual(focusedElement, linkField) {
             hasKeyboardFocus = true
             break
