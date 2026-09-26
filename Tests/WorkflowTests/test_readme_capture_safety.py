@@ -1,4 +1,7 @@
+import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,6 +18,8 @@ SUBMIT_SCRIPT = REPO_ROOT / "Scripts/submit-readme-video.applescript"
 ACCESSIBILITY_SCRIPT = REPO_ROOT / "Scripts/wait-for-readme-transcript.applescript"
 ACCESSIBILITY_VERIFIER = REPO_ROOT / "Scripts/verify_transcript_accessibility.py"
 VERIFY_SCRIPT = REPO_ROOT / "Scripts/verify-and-capture-readme-window.swift"
+FOCUS_SCRIPT = REPO_ROOT / "Scripts/focus-readme-link-field.swift"
+CI_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/macos-ci.yml"
 
 
 class ReadmeCaptureWorkflowTests(unittest.TestCase):
@@ -26,6 +31,7 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
         cls.accessibility_text = ACCESSIBILITY_SCRIPT.read_text(encoding="utf-8")
         cls.accessibility_verifier_text = ACCESSIBILITY_VERIFIER.read_text(encoding="utf-8")
         cls.verify_text = VERIFY_SCRIPT.read_text(encoding="utf-8")
+        cls.ci_workflow_text = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
 
     @unittest.skipIf(yaml is None, "PyYAML is optional; GitHub validates workflow syntax before dispatch")
     def test_workflow_yaml_parses_as_manual_dispatch_only(self):
@@ -95,13 +101,98 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
         self.assertLess(self.capture_text.index("shasum -a 256 -c"), self.capture_text.index('open "$APP_PATH"'))
         self.assertLess(self.capture_text.index("swiftc Scripts/verify-and-capture-readme-window.swift"), self.capture_text.index('open "$APP_PATH"'))
 
-    def test_app_gets_no_github_token_and_uses_text_field_return(self):
+    def test_app_gets_no_github_token_and_submits_without_positional_field_index(self):
         self.assertIn("unset GH_TOKEN GITHUB_TOKEN", self.capture_text)
         self.assertLess(self.capture_text.index("unset GH_TOKEN GITHUB_TOKEN"), self.capture_text.index('open "$APP_PATH"'))
-        self.assertIn("text field 1", self.submit_text.lower())
+        self.assertNotIn("text field 1", self.submit_text.lower())
         self.assertIn("key code 36", self.submit_text.lower())
         self.assertNotIn("Get transcript", self.submit_text)
         self.assertNotIn("click button", self.submit_text.lower())
+        self.assertNotIn("keystroke", self.submit_text.lower())
+        self.assertEqual(self.submit_text.lower().count("key code 36"), 1)
+        self.assertIn("swiftc Scripts/focus-readme-link-field.swift", self.capture_text)
+        self.assertIn('"$CAPTURE_ROOT/focus-link-field" "$VIDEO_URL"', self.capture_text)
+        self.assertLess(
+            self.capture_text.index('"$CAPTURE_ROOT/focus-link-field" "$VIDEO_URL"'),
+            self.capture_text.index('osascript Scripts/submit-readme-video.applescript'),
+        )
+
+    def test_link_field_is_found_by_unique_accessibility_placeholder(self):
+        self.assertTrue(FOCUS_SCRIPT.is_file(), "The capture must locate the URL field through Accessibility APIs.")
+        focus_text = FOCUS_SCRIPT.read_text(encoding="utf-8")
+        for marker in (
+            "kAXPlaceholderValueAttribute",
+            "Paste or drag a YouTube link here",
+            "kAXTextFieldRole",
+            "kAXChildrenAttribute",
+            "valueIsSettable",
+            "uniqueMatch(matchingFields)",
+            "uniqueMatch([AccessibilityFieldDescriptor]())",
+            "uniqueMatch([expected, expected])",
+            "kAXValueAttribute",
+            "videoURL as CFString",
+            "hasExpectedValue",
+            "kAXFocusedAttribute",
+            "kAXFocusedUIElementAttribute",
+        ):
+            self.assertIn(marker, focus_text)
+        self.assertNotIn("text field 1", focus_text.lower())
+        self.assertNotIn("position", focus_text.lower())
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" and shutil.which("swiftc"),
+        "Swift Accessibility helper runs in macOS PR CI",
+    )
+    def test_accessibility_locator_fixture_rejects_wrong_and_ambiguous_fields(self):
+        build_dir = REPO_ROOT / ".build"
+        build_dir.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="readme-accessibility-test-", dir=build_dir) as temp_dir:
+            executable = Path(temp_dir) / "focus-readme-link-field"
+            compile_result = subprocess.run(
+                [
+                    "swiftc",
+                    str(FOCUS_SCRIPT),
+                    "-framework",
+                    "AppKit",
+                    "-framework",
+                    "ApplicationServices",
+                    "-o",
+                    str(executable),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stdout + compile_result.stderr)
+            result = subprocess.run(
+                [str(executable), "--self-test"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("self-tests passed", result.stdout)
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" and shutil.which("osacompile"),
+        "AppleScript compilation runs in macOS PR CI",
+    )
+    def test_submission_applescript_compiles_without_dispatching_capture(self):
+        build_dir = REPO_ROOT / ".build"
+        build_dir.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="readme-submit-test-", dir=build_dir) as temp_dir:
+            result = subprocess.run(
+                ["osacompile", "-o", str(Path(temp_dir) / "submit.scpt"), str(SUBMIT_SCRIPT)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_safety_regressions_run_in_existing_pr_ci_not_manual_capture(self):
+        self.assertIn("pull_request:", self.ci_workflow_text)
+        self.assertIn("python3 -m unittest discover -s Tests/WorkflowTests -p 'test_*.py' -v", self.ci_workflow_text)
+        self.assertNotIn("unittest discover", self.workflow_text)
 
     def test_capture_fails_closed_on_missing_transcript_and_saves_window_only(self):
         self.assertIn("CaptionGrab", self.verify_text)

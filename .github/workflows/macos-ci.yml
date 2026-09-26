@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
-      - name: Run capture and media safety tests
+      - name: Run capture workflow, media, and accessibility safety regressions
         run: python3 -m unittest discover -s Tests/WorkflowTests -p 'test_*.py' -v
       - name: Record Apple toolchain
         run: |
