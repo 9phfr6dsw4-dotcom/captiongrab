@@ -35,5 +35,6 @@ jobs:
           path: |
             dist/CaptionGrab.zip
             dist/CaptionGrab.zip.sha256
+            dist/CaptionGrab-AppIcon-Preview.png
           if-no-files-found: error
           retention-days: 30

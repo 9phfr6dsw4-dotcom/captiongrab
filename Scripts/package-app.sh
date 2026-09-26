@@ -16,9 +16,20 @@ cp -R ChromeExtension/. "$APP/Contents/Resources/ChromeExtension/"
 test -x "$APP/Contents/MacOS/CaptionGrabNativeHost"
 test -f "$APP/Contents/Resources/ChromeExtension/manifest.json"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-swift Scripts/generate_icon.swift "$APP/Contents/Resources/CaptionGrab.iconset"
-iconutil -c icns "$APP/Contents/Resources/CaptionGrab.iconset" -o "$APP/Contents/Resources/CaptionGrab.icns"
-rm -rf "$APP/Contents/Resources/CaptionGrab.iconset"
+ICONSET="$APP/Contents/Resources/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for s in 16 32 128 256 512; do
+  sips -z "$s" "$s" Resources/AppIcon-1024.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  d=$((s * 2))
+  if [[ "$d" == 1024 ]]; then
+    cp Resources/AppIcon-1024.png "$ICONSET/icon_${s}x${s}@2x.png"
+  else
+    sips -z "$d" "$d" Resources/AppIcon-1024.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  fi
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET"
+python3 Scripts/test-app-icon.py "$APP"
 
 plutil -lint "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" | grep -Fx '26.0'
@@ -47,6 +58,7 @@ codesign --verify --deep --strict "$EXTRACTED_APP"
 codesign --verify --strict "$EXTRACTED_APP/Contents/MacOS/CaptionGrabNativeHost"
 python3 Scripts/test-unsandboxed-app.py "$EXTRACTED_APP/Contents/MacOS/CaptionGrabNativeHost"
 python3 Scripts/test-unsandboxed-app.py "$EXTRACTED_APP"
+python3 Scripts/test-app-icon.py "$EXTRACTED_APP" --preview "dist/CaptionGrab-AppIcon-Preview.png"
 unzip -t "$ZIP"
 HASH="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 printf '%s  CaptionGrab.zip\n' "$HASH" > "$ZIP.sha256"
