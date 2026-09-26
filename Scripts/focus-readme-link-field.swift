@@ -46,35 +46,50 @@ private func uniqueMatch<T>(_ candidates: [T]) -> T? {
     return candidates[0]
 }
 
-private func findLinkFields(in root: AXUIElement) -> [AXUIElement] {
-    var matches: [AXUIElement] = []
-    var pending: [(element: AXUIElement, depth: Int)] = [(root, 0)]
+private let maximumAccessibilityTraversalDepth = 32
+private let maximumVisitedAccessibilityNodes = 2_000
+
+private enum AccessibilityTraversalError: Error, Equatable, CustomStringConvertible {
+    case depthLimitExceeded(depth: Int)
+    case nodeLimitExceeded(limit: Int)
+    case childEnumerationFailed
+
+    var description: String {
+        switch self {
+        case .depthLimitExceeded(let depth):
+            return "depth limit exceeded at depth \(depth)"
+        case .nodeLimitExceeded(let limit):
+            return "node limit of \(limit) exceeded"
+        case .childEnumerationFailed:
+            return "a node's children could not be enumerated"
+        }
+    }
+}
+
+private func traverseAccessibilityTree<Node>(
+    root: Node,
+    depthLimit: Int = maximumAccessibilityTraversalDepth,
+    nodeLimit: Int = maximumVisitedAccessibilityNodes,
+    children: (Node) throws -> [Node],
+    matches isMatch: (Node) -> Bool
+) throws -> [Node] {
+    var matches: [Node] = []
+    var pending: [(node: Node, depth: Int)] = [(root, 0)]
     var visitedCount = 0
 
     while let current = pending.popLast() {
+        guard current.depth <= depthLimit else {
+            throw AccessibilityTraversalError.depthLimitExceeded(depth: current.depth)
+        }
         visitedCount += 1
-        guard visitedCount <= 2_000 else {
-            fail("CaptionGrab's accessibility tree exceeded the safe search limit.")
-        }
-        guard current.depth <= 32 else { continue }
-
-        let role = stringAttribute(current.element, kAXRoleAttribute) ?? ""
-        let placeholder = stringAttribute(current.element, kAXPlaceholderValueAttribute)
-        let descriptor = AccessibilityFieldDescriptor(
-            role: role,
-            placeholder: placeholder,
-            valueIsSettable: role == kAXTextFieldRole
-                && placeholder == expectedPlaceholder
-                && isAttributeSettable(current.element, kAXValueAttribute)
-        )
-        if isYouTubeLinkField(descriptor) {
-            matches.append(current.element)
+        guard visitedCount <= nodeLimit else {
+            throw AccessibilityTraversalError.nodeLimitExceeded(limit: nodeLimit)
         }
 
-        guard let children = attribute(current.element, kAXChildrenAttribute) as? [AXUIElement] else {
-            continue
+        if isMatch(current.node) {
+            matches.append(current.node)
         }
-        for child in children {
+        for child in try children(current.node) {
             pending.append((child, current.depth + 1))
         }
     }
@@ -82,7 +97,63 @@ private func findLinkFields(in root: AXUIElement) -> [AXUIElement] {
     return matches
 }
 
-private func runLocatorSelfTests() {
+private func accessibilityChildren(of element: AXUIElement) throws -> [AXUIElement] {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
+          let value,
+          let children = value as? [AXUIElement] else {
+        throw AccessibilityTraversalError.childEnumerationFailed
+    }
+    return children
+}
+
+private func findLinkFields(in root: AXUIElement) throws -> [AXUIElement] {
+    try traverseAccessibilityTree(
+        root: root,
+        children: { try accessibilityChildren(of: $0) },
+        matches: { element in
+            let role = stringAttribute(element, kAXRoleAttribute) ?? ""
+            let placeholder = stringAttribute(element, kAXPlaceholderValueAttribute)
+            return isYouTubeLinkField(AccessibilityFieldDescriptor(
+                role: role,
+                placeholder: placeholder,
+                valueIsSettable: role == kAXTextFieldRole
+                    && placeholder == expectedPlaceholder
+                    && isAttributeSettable(element, kAXValueAttribute)
+            ))
+        }
+    )
+}
+
+private final class AccessibilityTraversalFixtureNode {
+    let name: String
+    let isMatch: Bool
+    var children: [AccessibilityTraversalFixtureNode]? = []
+
+    init(_ name: String, isMatch: Bool = false) {
+        self.name = name
+        self.isMatch = isMatch
+    }
+}
+
+private func fixtureMatches(
+    from root: AccessibilityTraversalFixtureNode,
+    depthLimit: Int = maximumAccessibilityTraversalDepth
+) throws -> [AccessibilityTraversalFixtureNode] {
+    try traverseAccessibilityTree(
+        root: root,
+        depthLimit: depthLimit,
+        children: { node in
+            guard let children = node.children else {
+                throw AccessibilityTraversalError.childEnumerationFailed
+            }
+            return children
+        },
+        matches: { $0.isMatch }
+    )
+}
+
+private func runLocatorSelfTests() throws {
     let expected = AccessibilityFieldDescriptor(
         role: kAXTextFieldRole,
         placeholder: expectedPlaceholder,
@@ -116,6 +187,62 @@ private func runLocatorSelfTests() {
     precondition(uniqueMatch([expected]) != nil, "A single semantic match must be accepted.")
     precondition(uniqueMatch([AccessibilityFieldDescriptor]()) == nil, "Zero matches must fail closed.")
     precondition(uniqueMatch([expected, expected]) == nil, "Multiple matches must fail closed.")
+
+    let uniqueRoot = AccessibilityTraversalFixtureNode("root")
+    let uniqueNode = AccessibilityTraversalFixtureNode("unique", isMatch: true)
+    uniqueRoot.children = [uniqueNode]
+    let uniqueTraversalMatches = try fixtureMatches(from: uniqueRoot)
+    precondition(
+        uniqueTraversalMatches.count == 1 && uniqueTraversalMatches.first === uniqueNode,
+        "A complete traversal with one semantic match must be accepted."
+    )
+
+    let ambiguousRoot = AccessibilityTraversalFixtureNode("root")
+    let firstMatch = AccessibilityTraversalFixtureNode("first", isMatch: true)
+    let secondMatch = AccessibilityTraversalFixtureNode("second", isMatch: true)
+    ambiguousRoot.children = [firstMatch, secondMatch]
+    let ambiguousTraversalMatches = try fixtureMatches(from: ambiguousRoot)
+    precondition(
+        uniqueMatch(ambiguousTraversalMatches) == nil,
+        "A complete traversal with multiple semantic matches must fail closed."
+    )
+
+    let deepRoot = AccessibilityTraversalFixtureNode("depth-0")
+    var deepestNode = deepRoot
+    for _ in 1...(maximumAccessibilityTraversalDepth + 1) {
+        let child = AccessibilityTraversalFixtureNode("deep-child")
+        deepestNode.children = [child]
+        deepestNode = child
+    }
+    do {
+        _ = try fixtureMatches(from: deepRoot)
+        preconditionFailure("Depth-limit traversal must fail closed.")
+    } catch let error as AccessibilityTraversalError {
+        precondition(
+            error == .depthLimitExceeded(depth: maximumAccessibilityTraversalDepth + 1),
+            "Depth-limit traversal must fail closed."
+        )
+    } catch {
+        preconditionFailure("Depth-limit traversal must fail closed: \\(error).")
+    }
+
+    let incompleteRoot = AccessibilityTraversalFixtureNode("root")
+    let unreadableChildren = AccessibilityTraversalFixtureNode("unreadable-children")
+    unreadableChildren.children = nil
+    let matchBeforeFailure = AccessibilityTraversalFixtureNode("match-before-failure", isMatch: true)
+    incompleteRoot.children = [unreadableChildren, matchBeforeFailure]
+    do {
+        _ = try fixtureMatches(from: incompleteRoot)
+        preconditionFailure("Unreadable child enumeration must fail the whole traversal.")
+    } catch let error as AccessibilityTraversalError {
+        precondition(
+            error == .childEnumerationFailed,
+            "Unreadable child enumeration must fail the whole traversal."
+        )
+    } catch {
+        preconditionFailure("Unreadable child enumeration must fail the whole traversal: \\(error).")
+    }
+
     print("Accessibility locator self-tests passed.")
 }
 
@@ -132,7 +259,12 @@ private func focusAndSetYouTubeLinkField(to videoURL: String) {
         fail("CaptionGrab's main window is unavailable through Accessibility.")
     }
 
-    let matchingFields = windows.flatMap { findLinkFields(in: $0) }
+    let matchingFields: [AXUIElement]
+    do {
+        matchingFields = try windows.flatMap { try findLinkFields(in: $0) }
+    } catch {
+        fail("CaptionGrab's accessibility tree was incomplete; refusing to accept a possibly non-unique match (\(error)).")
+    }
     guard let linkField = uniqueMatch(matchingFields) else {
         fail("Expected one accessible CaptionGrab YouTube link field; found \(matchingFields.count).")
     }
@@ -181,7 +313,11 @@ private func focusAndSetYouTubeLinkField(to videoURL: String) {
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 if arguments == ["--self-test"] {
-    runLocatorSelfTests()
+    do {
+        try runLocatorSelfTests()
+    } catch {
+        fail("Accessibility locator self-tests failed: \\(error).")
+    }
 } else {
     guard arguments.count == 1 else {
         fail("Exactly one public video URL is required.")

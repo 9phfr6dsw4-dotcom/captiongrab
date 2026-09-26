@@ -139,6 +139,11 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
         self.assertNotIn("text field 1", focus_text.lower())
         self.assertNotIn("position", focus_text.lower())
 
+    def test_locator_self_tests_cover_truncated_and_incomplete_traversals(self):
+        focus_text = FOCUS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("Depth-limit traversal must fail closed.", focus_text)
+        self.assertIn("Unreadable child enumeration must fail the whole traversal.", focus_text)
+
     @unittest.skipUnless(
         sys.platform == "darwin" and shutil.which("swiftc"),
         "Swift Accessibility helper runs in macOS PR CI",
