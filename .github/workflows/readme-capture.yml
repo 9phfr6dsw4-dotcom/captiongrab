@@ -36,6 +36,20 @@ jobs:
           print(number)
           SWIFT
           APP="dist/CaptionGrab.app"
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+          cat > "$RUNNER_TEMP/seed-history.swift" <<'SWIFT'
+          import Foundation
+          struct RecentVideo: Codable {
+            let videoID: String
+            let title: String
+            let videoURL: URL
+            let lastFetchedAt: Date
+          }
+          let suite = UserDefaults(suiteName: CommandLine.arguments[1])!
+          let video = RecentVideo(videoID: "aircAruvnKk", title: "Neural network basics", videoURL: URL(string: "https://www.youtube.com/watch?v=aircAruvnKk")!, lastFetchedAt: Date())
+          suite.set(try JSONEncoder().encode([video]), forKey: "CaptionGrab.recentVideos")
+          SWIFT
+          swift "$RUNNER_TEMP/seed-history.swift" "$BUNDLE_ID"
           open "$APP"
           sleep 4
           printf 'https://www.youtube.com/watch?v=aircAruvnKk' | pbcopy
