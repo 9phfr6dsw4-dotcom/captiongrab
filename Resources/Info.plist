@@ -9,7 +9,7 @@
     <key>CFBundleExecutable</key>
     <string>CaptionGrab</string>
     <key>CFBundleIconFile</key>
-    <string>CaptionGrab</string>
+    <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
     <string>1.2.16</string>
     <key>CFBundleVersion</key>
