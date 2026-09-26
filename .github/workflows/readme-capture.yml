@@ -60,9 +60,12 @@ jobs:
               delay 1
               keystroke tab
               keystroke "v" using {command down}
+              delay 1
+              click button "Get transcript"
             end tell
           end tell
           APPLESCRIPT
+          sleep 18
           ICON_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist")"
           [[ "$ICON_NAME" == *.icns ]] || ICON_NAME="$ICON_NAME.icns"
           sips -s format png "$APP/Contents/Resources/$ICON_NAME" --out "$RUNNER_TEMP/readme-images/captiongrab-icon.png" >/dev/null
