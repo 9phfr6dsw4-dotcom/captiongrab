@@ -35,7 +35,7 @@ The release is ad-hoc signed and not notarized. CaptionGrab needs no macOS priva
 3. If Chrome still points to an older or temporary folder, remove that stale entry and load the folder from the installed app.
 
 Keep CaptionGrab in Applications after setup. If you move it, run setup again to refresh the Native Messaging helper path.
-After installing CaptionGrab 1.2.16, open `chrome://extensions` and click **Reload** on the CaptionGrab companion so Chrome loads extension version 1.2.13 from the updated app bundle.
+After installing CaptionGrab 1.2.17, open `chrome://extensions` and click **Reload** on the CaptionGrab companion so Chrome loads extension version 1.2.13 from the updated app bundle.
 If automatic panel opening fails, use **Copy debug log** to capture a privacy-safe trace; caption text is not included.
 
 </details>
