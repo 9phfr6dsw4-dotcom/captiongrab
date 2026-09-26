@@ -28,9 +28,12 @@ jobs:
           guard args.count == 3 else { fatalError("owner and output required") }
           let owner = args[1]
           let output = URL(fileURLWithPath: args[2])
+          let ownerKey = kCGWindowOwnerName as String
+          let layerKey = kCGWindowLayer as String
+          let numberKey = kCGWindowNumber as String
           let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
-          guard let row = windows.first(where: { ($0[kCGWindowOwnerName] as? String) == owner && ($0[kCGWindowLayer] as? Int ?? 0) == 0 }),
-                let number = row[kCGWindowNumber] as? CGWindowID,
+          guard let row = windows.first(where: { ($0[ownerKey] as? String) == owner && ($0[layerKey] as? Int ?? 0) == 0 }),
+                let number = row[numberKey] as? CGWindowID,
                 let image = CGWindowListCreateImage(.null, .optionIncludingWindow, number, [.boundsIgnoreFraming, .bestResolution]),
                 let destination = CGImageDestinationCreateWithURL(output as CFURL, UTType.png.identifier as CFString, 1, nil) else {
             fputs("Could not capture a visible window for \(owner)\n", stderr); exit(1)
@@ -41,15 +44,14 @@ jobs:
           APP="dist/CaptionGrab.app"
           open "$APP"
           sleep 4
+          printf 'https://www.youtube.com/watch?v=aircAruvnKk' | pbcopy
           osascript <<'APPLESCRIPT'
           tell application "System Events"
             tell process "CaptionGrab"
               set frontmost to true
-              repeat 10 times
-                if (count of windows) > 0 then exit repeat
-                delay 1
-              end repeat
-              set value of text field 1 of window 1 to "https://www.youtube.com/watch?v=aircAruvnKk"
+              delay 1
+              keystroke tab
+              keystroke "v" using {command down}
             end tell
           end tell
           APPLESCRIPT
