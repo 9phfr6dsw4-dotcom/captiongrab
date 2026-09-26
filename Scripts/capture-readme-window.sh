@@ -95,7 +95,6 @@ swiftc Scripts/verify-and-capture-readme-window.swift \
 printf '%s\n' 'Launching the verified release app and submitting the public video URL with Return.'
 unset GH_TOKEN GITHUB_TOKEN
 open "$APP_PATH"
-sleep 3
 "$CAPTURE_ROOT/focus-link-field" "$VIDEO_URL"
 osascript Scripts/submit-readme-video.applescript
 

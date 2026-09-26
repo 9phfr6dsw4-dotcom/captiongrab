@@ -126,7 +126,7 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
             "kAXTextFieldRole",
             "kAXChildrenAttribute",
             "valueIsSettable",
-            "uniqueMatch(matchingFields)",
+            "waitForUniqueMatch",
             "uniqueMatch([AccessibilityFieldDescriptor]())",
             "uniqueMatch([expected, expected])",
             "kAXValueAttribute",
@@ -139,16 +139,39 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
         self.assertNotIn("text field 1", focus_text.lower())
         self.assertNotIn("position", focus_text.lower())
 
-    def test_locator_self_tests_cover_truncated_and_incomplete_traversals(self):
+    def test_locator_self_tests_cover_truncated_incomplete_and_readiness_cases(self):
         focus_text = FOCUS_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("Depth-limit traversal must fail closed.", focus_text)
         self.assertIn("Unreadable child enumeration must fail the whole traversal.", focus_text)
+        self.assertIn("Readiness fixture accepts one delayed exact field.", focus_text)
+        self.assertIn("Readiness fixture times out when no exact field appears.", focus_text)
+        self.assertIn("Ambiguous readiness must fail without retrying.", focus_text)
+        self.assertIn("Enumeration failure must fail without retrying.", focus_text)
+
+    def test_capture_uses_bounded_window_and_exact_field_readiness(self):
+        focus_text = FOCUS_SCRIPT.read_text(encoding="utf-8")
+        for marker in (
+            "startupReadinessTimeout",
+            "startupPollInterval",
+            "waitForUniqueMatch",
+            "ProcessInfo.processInfo.systemUptime",
+            "kAXWindowsAttribute",
+            "windowEnumerationFailed",
+            "CaptionGrab's accessibility tree was incomplete",
+            "Expected one accessible CaptionGrab YouTube link field",
+            "CaptionGrab readiness failed",
+            "exit(1)",
+        ):
+            self.assertIn(marker, focus_text)
+        self.assertNotIn("sleep 3", self.capture_text)
+        self.assertLess(self.capture_text.index('open "$APP_PATH"'), self.capture_text.index('"$CAPTURE_ROOT/focus-link-field" "$VIDEO_URL"'))
+        self.assertLess(self.capture_text.index('"$CAPTURE_ROOT/focus-link-field" "$VIDEO_URL"'), self.capture_text.index('osascript Scripts/submit-readme-video.applescript'))
 
     @unittest.skipUnless(
         sys.platform == "darwin" and shutil.which("swiftc"),
         "Swift Accessibility helper runs in macOS PR CI",
     )
-    def test_accessibility_locator_fixture_rejects_wrong_and_ambiguous_fields(self):
+    def test_accessibility_locator_and_readiness_polling_fixtures(self):
         build_dir = REPO_ROOT / ".build"
         build_dir.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="readme-accessibility-test-", dir=build_dir) as temp_dir:
@@ -194,10 +217,19 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_safety_regressions_run_in_existing_pr_ci_not_manual_capture(self):
+    def test_safety_regressions_run_before_manual_capture_and_in_existing_pr_ci(self):
+        command = "python3 -m unittest discover -s Tests/WorkflowTests -p 'test_*.py' -v"
+        workflow = yaml.safe_load(self.workflow_text) if yaml else None
+        assert workflow is not None, "PyYAML is required to inspect the manual workflow step order."
+        steps = workflow["jobs"]["capture"]["steps"]
+        preflight = [step for step in steps if step.get("name") == "Run workflow safety and input tests"]
+        capture = [step for step in steps if step.get("name", "").startswith("Download verified release and capture")]
+        self.assertEqual(len(preflight), 1)
+        self.assertEqual(len(capture), 1)
+        self.assertEqual(preflight[0].get("run"), command)
+        self.assertEqual(steps.index(capture[0]), steps.index(preflight[0]) + 1)
         self.assertIn("pull_request:", self.ci_workflow_text)
-        self.assertIn("python3 -m unittest discover -s Tests/WorkflowTests -p 'test_*.py' -v", self.ci_workflow_text)
-        self.assertNotIn("unittest discover", self.workflow_text)
+        self.assertIn(command, self.ci_workflow_text)
 
     def test_capture_fails_closed_on_missing_transcript_and_saves_window_only(self):
         self.assertIn("CaptionGrab", self.verify_text)

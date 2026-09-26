@@ -5,6 +5,8 @@ import Foundation
 
 private let bundleIdentifier = "com.captiongrab.app"
 private let expectedPlaceholder = "Paste or drag a YouTube link here"
+private let startupReadinessTimeout: TimeInterval = 20
+private let startupPollInterval: TimeInterval = 0.25
 
 private struct AccessibilityFieldDescriptor {
     let role: String
@@ -46,6 +48,53 @@ private func uniqueMatch<T>(_ candidates: [T]) -> T? {
     return candidates[0]
 }
 
+private enum StartupReadinessError: Error, Equatable, CustomStringConvertible {
+    case timedOut(timeout: TimeInterval)
+    case ambiguousMatches(count: Int)
+    case ambiguousApplications(count: Int)
+
+    var description: String {
+        switch self {
+        case .timedOut(let timeout):
+            return "CaptionGrab did not expose one editable YouTube link field within \(timeout) seconds."
+        case .ambiguousMatches(let count):
+            return "Expected one accessible CaptionGrab YouTube link field; found \(count)."
+        case .ambiguousApplications(let count):
+            return "Expected one running CaptionGrab app; found \(count)."
+        }
+    }
+}
+
+private func waitForUniqueMatch<Value>(
+    timeout: TimeInterval = startupReadinessTimeout,
+    pollInterval: TimeInterval = startupPollInterval,
+    now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+    candidates: () throws -> [Value]
+) throws -> Value {
+    let deadline = now() + timeout
+
+    while true {
+        let currentCandidates = try candidates()
+        guard currentCandidates.count <= 1 else {
+            throw StartupReadinessError.ambiguousMatches(count: currentCandidates.count)
+        }
+        guard now() <= deadline else {
+            throw StartupReadinessError.timedOut(timeout: timeout)
+        }
+
+        if currentCandidates.count == 1 {
+            return currentCandidates[0]
+        }
+
+        let remaining = deadline - now()
+        guard remaining > 0 else {
+            throw StartupReadinessError.timedOut(timeout: timeout)
+        }
+        sleep(min(pollInterval, remaining))
+    }
+}
+
 private let maximumAccessibilityTraversalDepth = 32
 private let maximumVisitedAccessibilityNodes = 2_000
 
@@ -53,6 +102,7 @@ private enum AccessibilityTraversalError: Error, Equatable, CustomStringConverti
     case depthLimitExceeded(depth: Int)
     case nodeLimitExceeded(limit: Int)
     case childEnumerationFailed
+    case windowEnumerationFailed(status: Int)
 
     var description: String {
         switch self {
@@ -62,6 +112,8 @@ private enum AccessibilityTraversalError: Error, Equatable, CustomStringConverti
             return "node limit of \(limit) exceeded"
         case .childEnumerationFailed:
             return "a node's children could not be enumerated"
+        case .windowEnumerationFailed(let status):
+            return "CaptionGrab's windows could not be enumerated (AX status \(status))"
         }
     }
 }
@@ -123,6 +175,46 @@ private func findLinkFields(in root: AXUIElement) throws -> [AXUIElement] {
             ))
         }
     )
+}
+
+private struct LocatedLinkField {
+    let appElement: AXUIElement
+    let field: AXUIElement
+}
+
+private func accessibilityWindows(of appElement: AXUIElement) throws -> [AXUIElement] {
+    var value: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value)
+    if status == .noValue {
+        return []
+    }
+    guard status == .success, let value else {
+        throw AccessibilityTraversalError.windowEnumerationFailed(status: Int(status.rawValue))
+    }
+    guard let windows = value as? [AXUIElement] else {
+        throw AccessibilityTraversalError.windowEnumerationFailed(status: Int(status.rawValue))
+    }
+    return windows
+}
+
+private func accessibleLinkFieldCandidates() throws -> [LocatedLinkField] {
+    let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+        .filter { !$0.isTerminated }
+    guard !runningApps.isEmpty else { return [] }
+    guard runningApps.count == 1 else {
+        throw StartupReadinessError.ambiguousApplications(count: runningApps.count)
+    }
+
+    let app = runningApps[0]
+    _ = app.activate(options: [.activateAllWindows])
+    let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    _ = AXUIElementSetMessagingTimeout(appElement, 1.0)
+    let windows = try accessibilityWindows(of: appElement)
+
+    return try windows.flatMap { window in
+        _ = AXUIElementSetMessagingTimeout(window, 1.0)
+        return try findLinkFields(in: window).map { LocatedLinkField(appElement: appElement, field: $0) }
+    }
 }
 
 private final class AccessibilityTraversalFixtureNode {
@@ -243,31 +335,101 @@ private func runLocatorSelfTests() throws {
         preconditionFailure("Unreadable child enumeration must fail the whole traversal: \\(error).")
     }
 
+    var delayedClock: TimeInterval = 0
+    var delayedAttempts = 0
+    let delayedField = try waitForUniqueMatch(
+        timeout: 1,
+        pollInterval: 0.2,
+        now: { delayedClock },
+        sleep: { delayedClock += $0 },
+        candidates: {
+            delayedAttempts += 1
+            return delayedAttempts >= 3 ? [expected] : []
+        }
+    )
+    precondition(
+        isYouTubeLinkField(delayedField),
+        "Readiness fixture accepts one delayed exact field."
+    )
+
+    var timeoutClock: TimeInterval = 0
+    var timeoutAttempts = 0
+    do {
+        _ = try waitForUniqueMatch(
+            timeout: 0.5,
+            pollInterval: 0.2,
+            now: { timeoutClock },
+            sleep: { timeoutClock += $0 },
+            candidates: {
+                timeoutAttempts += 1
+                return [AccessibilityFieldDescriptor]()
+            }
+        )
+        preconditionFailure("Readiness fixture times out when no exact field appears.")
+    } catch let error as StartupReadinessError {
+        precondition(
+            error == .timedOut(timeout: 0.5) && timeoutAttempts > 0,
+            "Readiness fixture times out when no exact field appears."
+        )
+    }
+
+    var ambiguityAttempts = 0
+    do {
+        _ = try waitForUniqueMatch(
+            timeout: 1,
+            pollInterval: 0.2,
+            now: { 0 },
+            sleep: { _ in preconditionFailure("Ambiguous readiness must not sleep.") },
+            candidates: {
+                ambiguityAttempts += 1
+                return [expected, expected]
+            }
+        )
+        preconditionFailure("Ambiguous readiness must fail without retrying.")
+    } catch let error as StartupReadinessError {
+        precondition(
+            error == .ambiguousMatches(count: 2) && ambiguityAttempts == 1,
+            "Ambiguous readiness must fail without retrying."
+        )
+    }
+
+    var enumerationAttempts = 0
+    do {
+        _ = try waitForUniqueMatch(
+            timeout: 1,
+            pollInterval: 0.2,
+            now: { 0 },
+            sleep: { _ in preconditionFailure("Enumeration failure must not sleep.") },
+            candidates: {
+                enumerationAttempts += 1
+                return try fixtureMatches(from: incompleteRoot)
+            }
+        )
+        preconditionFailure("Enumeration failure must fail without retrying.")
+    } catch let error as AccessibilityTraversalError {
+        precondition(
+            error == .childEnumerationFailed && enumerationAttempts == 1,
+            "Enumeration failure must fail without retrying."
+        )
+    }
+
     print("Accessibility locator self-tests passed.")
 }
 
 private func focusAndSetYouTubeLinkField(to videoURL: String) {
-    let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
-        .filter { !$0.isTerminated }
-    guard let app = runningApps.first else {
-        fail("CaptionGrab is not running; cannot locate its accessible YouTube link field.")
-    }
-
-    _ = app.activate(options: [.activateAllWindows])
-    let appElement = AXUIElementCreateApplication(app.processIdentifier)
-    guard let windows = attribute(appElement, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
-        fail("CaptionGrab's main window is unavailable through Accessibility.")
-    }
-
-    let matchingFields: [AXUIElement]
+    let locatedField: LocatedLinkField
     do {
-        matchingFields = try windows.flatMap { try findLinkFields(in: $0) }
-    } catch {
+        locatedField = try waitForUniqueMatch(candidates: {
+            try accessibleLinkFieldCandidates()
+        })
+    } catch let error as AccessibilityTraversalError {
         fail("CaptionGrab's accessibility tree was incomplete; refusing to accept a possibly non-unique match (\(error)).")
+    } catch {
+        fail("CaptionGrab readiness failed; refusing to submit without one exact accessible YouTube link field (\(error)).")
     }
-    guard let linkField = uniqueMatch(matchingFields) else {
-        fail("Expected one accessible CaptionGrab YouTube link field; found \(matchingFields.count).")
-    }
+
+    let appElement = locatedField.appElement
+    let linkField = locatedField.field
 
     guard AXUIElementSetAttributeValue(
         linkField,
