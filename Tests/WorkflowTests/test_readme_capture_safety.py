@@ -219,15 +219,20 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
 
     def test_safety_regressions_run_before_manual_capture_and_in_existing_pr_ci(self):
         command = "python3 -m unittest discover -s Tests/WorkflowTests -p 'test_*.py' -v"
-        workflow = yaml.safe_load(self.workflow_text) if yaml else None
-        assert workflow is not None, "PyYAML is required to inspect the manual workflow step order."
-        steps = workflow["jobs"]["capture"]["steps"]
-        preflight = [step for step in steps if step.get("name") == "Run workflow safety and input tests"]
-        capture = [step for step in steps if step.get("name", "").startswith("Download verified release and capture")]
-        self.assertEqual(len(preflight), 1)
-        self.assertEqual(len(capture), 1)
-        self.assertEqual(preflight[0].get("run"), command)
-        self.assertEqual(steps.index(capture[0]), steps.index(preflight[0]) + 1)
+        preflight_step = (
+            "      - name: Run workflow safety and input tests\n"
+            f"        run: {command}"
+        )
+        capture_step = (
+            "      - name: Download verified release and capture the loaded app window\n"
+            "        run: bash Scripts/capture-readme-window.sh"
+        )
+        self.assertIn(preflight_step, self.workflow_text)
+        self.assertIn(capture_step, self.workflow_text)
+        preflight_end = self.workflow_text.index(preflight_step) + len(preflight_step)
+        capture_start = self.workflow_text.index(capture_step)
+        self.assertLess(preflight_end, capture_start)
+        self.assertEqual(self.workflow_text[preflight_end:capture_start].strip(), "")
         self.assertIn("pull_request:", self.ci_workflow_text)
         self.assertIn(command, self.ci_workflow_text)
 
