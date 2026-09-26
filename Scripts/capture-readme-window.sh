@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${GITHUB_REPOSITORY:-}" != "9phfr6dsw4-dotcom/captiongrab" ]]; then
+  printf '%s\n' 'Refusing capture: only the canonical CaptionGrab repository is allowed.' >&2
+  exit 2
+fi
+
 if [[ "${GITHUB_REF:-}" != "refs/heads/main" ]]; then
   printf '%s\n' 'Refusing capture: only workflow_dispatch on main is allowed.' >&2
   exit 2

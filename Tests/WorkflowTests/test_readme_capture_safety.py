@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -49,6 +50,25 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
         self.assertIn('"${GITHUB_REF:-}" != "refs/heads/main"', self.capture_text)
         self.assertIn('CAPTURE_ROOT="$TEMP_ROOT/captiongrab-readme"', self.capture_text)
         self.assertNotIn('/Applications', self.capture_text)
+
+    def test_capture_requires_the_canonical_repository(self):
+        canonical_repo = "9phfr6dsw4-dotcom/captiongrab"
+        self.assertIn(f"if: github.repository == '{canonical_repo}'", self.workflow_text)
+        self.assertIn(
+            f'if [[ "${{GITHUB_REPOSITORY:-}}" != "{canonical_repo}" ]]',
+            self.capture_text,
+        )
+
+    def test_capture_script_exits_before_work_for_a_fork(self):
+        result = subprocess.run(
+            ["bash", str(CAPTURE_SCRIPT)],
+            env={"GITHUB_REPOSITORY": "attacker/captiongrab", "GITHUB_REF": "refs/heads/main"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("canonical", result.stderr.lower())
 
     def test_input_is_required_public_synthetic_captioned_youtube_video(self):
         if yaml:
