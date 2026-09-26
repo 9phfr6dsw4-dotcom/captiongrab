@@ -37,3 +37,27 @@ jobs:
             dist/CaptionGrab.zip.sha256
           if-no-files-found: error
           retention-days: 30
+
+  capture-readme-media:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/docs/presentation-polish'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture the latest CaptionGrab release
+        env:
+          APP_KEY: captiongrab
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/capture-readme-media.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: captiongrab-readme-media
+          path: |
+            docs/images/captiongrab-light.png
+            docs/images/captiongrab-dark.png
+            docs/images/captiongrab-hero.gif
+            docs/images/social-preview.png
+            ${{ runner.temp }}/readme-media/*
+          if-no-files-found: warn
+          retention-days: 14
