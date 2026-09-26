@@ -33,8 +33,8 @@ python3 Scripts/test-app-icon.py "$APP"
 
 plutil -lint "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" | grep -Fx '26.0'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx '1.2.16'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" | grep -Fx '20'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx '1.2.17'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" | grep -Fx '21'
 codesign --force --sign - "$APP/Contents/MacOS/CaptionGrabNativeHost"
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
