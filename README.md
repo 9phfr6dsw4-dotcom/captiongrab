@@ -1,46 +1,57 @@
-# CaptionGrab
+<p align="center">
+  <img src="docs/images/captiongrab-icon.png" width="88" alt="CaptionGrab app icon">
+</p>
 
-CaptionGrab is a native SwiftUI macOS app for fetching an English caption track from a YouTube link and exporting it as Markdown or Word (`.docx`). Direct retrieval prefers creator-made English captions and falls back to auto-generated English captions, with the track type shown in the app. If YouTube blocks direct requests, CaptionGrab can automatically read the transcript as displayed on the matching YouTube page in Chrome through its bundled unpacked extension and local Native Messaging helper.
+<h1 align="center">CaptionGrab</h1>
 
-**CaptionGrab is an unofficial personal-use tool and is not affiliated with, endorsed by, or sponsored by YouTube or Google.** It uses YouTube's undocumented web-player behavior, which may change or become unavailable.
+<p align="center">Get English YouTube captions and save them as Markdown or Word.</p>
 
-## Use
+<p align="center"><a href="https://github.com/9phfr6dsw4-dotcom/captiongrab/releases/latest"><strong>Download the latest release</strong></a> · macOS 26+</p>
 
-1. Paste or drag a YouTube watch, short, Shorts, live, or embed link into the app.
-2. Select **Get transcript**. The app shows the title, selected caption type, and transcript.
-   Use the **Clear YouTube link** icon beside a filled link to enter another video without clearing the current transcript or recent videos.
-3. Choose **Copy all**, **Save Markdown**, or **Save Word document**.
-4. Review or clear the locally stored recent list at any time.
+<p align="center"><img src="docs/images/captiongrab-window.png" alt="CaptionGrab with a sample YouTube URL and a recent demo video" width="820"></p>
 
-No account, API key, paid service, AI, or third-party runtime dependency is used. The app's network client is restricted to YouTube hosts. Transcript formatting, export, and history are handled on your Mac. Exported files are saved only to a location you choose.
+## Features
 
-CaptionGrab preserves the caption events and text supplied by YouTube, including source event order and explicit line breaks. The YouTube transcript panel has no published stable export contract; its visual line wrapping or grouping may differ. See [`docs/research.md`](docs/research.md).
+- Paste or drop a YouTube link. CaptionGrab prefers creator-made English captions and falls back to auto-generated English when available.
+- See the caption type, then copy the transcript or export it as Markdown or Word (`.docx`). Caption cue order and explicit line breaks are preserved.
+- If YouTube blocks direct retrieval, the optional Chrome companion reads the transcript shown on the matching video page without changing the displayed language or subtitle setting. It does not request cookie access.
+- Clear or replace a link without losing the current transcript or recent-video list.
+- Keep a recent-video list on your Mac and clear it whenever you like.
 
-## Download
+## Install
 
-Download the latest [`CaptionGrab.zip`](https://github.com/9phfr6dsw4-dotcom/captiongrab/releases/latest) from GitHub Releases. Requires macOS 26 or later. The app is not App Sandbox-signed; its ad-hoc signature is not notarized, so the first launch may require Control-click → **Open**.
+1. Download `CaptionGrab.zip` from the latest release and unzip it.
+2. Move **CaptionGrab.app** to **Applications before opening it**.
+3. Open it once. If macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**, confirm, then reopen CaptionGrab from Applications.
 
-## Chrome transcript fallback
+The release is ad-hoc signed and not notarized. CaptionGrab needs no macOS privacy permissions. The optional Chrome fallback needs the companion extension:
 
-1. Download the latest `CaptionGrab.zip`, replace `CaptionGrab.app` in Applications, and open it from Applications. The Chrome helper setup now detects when macOS launched a temporary App Translocation copy and asks Launch Services for a matching, complete, non-translocated installed copy. It registers the Native Messaging helper and reveals the extension folder from that stable copy—not the temporary path.
-2. Choose **Set up Chrome extension**. If CaptionGrab cannot find a valid installed copy, it shows Finder-only recovery steps with **Open Applications in Finder** and **Quit CaptionGrab** buttons. Quit, double-click CaptionGrab from Applications, and run setup again. If it is not there, use Finder to move CaptionGrab.app into Applications first; no Terminal commands are needed.
-3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder revealed by CaptionGrab. If Chrome still shows an extension loaded from the old temporary location, remove that stale entry and load the folder from the installed app.
-4. Click **Get transcript** as usual. When direct retrieval is blocked, CaptionGrab opens the matching video in Chrome, expands the description, waits for the Transcript section, clicks the inner **Show transcript** button, checks whether the transcript panel opened within about two seconds, and retries up to three total clicks if it did not. It selects the Transcript tab if the panel defaults to Chapters, including the modern transcript panel’s shadow-DOM controls, then waits for transcript rows before reading.
-5. After installing CaptionGrab 1.2.15, the bundled Chrome extension is still version **1.2.12**. If Chrome remains loaded from the installed app's `ChromeExtension` folder, no extension reload is needed for this app-only update. If it points to an older or missing folder, choose **Set up Chrome extension** and load the revealed folder at `chrome://extensions`.
-6. If automatic panel opening fails, click **Copy debug log** beneath CaptionGrab’s message, then paste the copied text into your reply. The log records relative timings, allowlisted control labels, observed open panels, controls clicked or rejected, and a bounded sample of panel element tags/roles (not their text). It does not include caption text. Other setup failures show the exact operation, path, OS error domain/code, and underlying error text.
+<details>
+<summary>Set up the optional Chrome companion</summary>
 
-On launch, CaptionGrab removes the old `CaptionGrab.chromeNativeMessagingFolderBookmark` preference left by older versions. This does not clear other settings, such as your chosen export folder. The Chrome Native Messaging manifest is installed under Chrome's Application Support folder; transcript messages are stored in CaptionGrab's normal Application Support folder. The extension reads transcript text shown on YouTube and does not request cookie access. For YouTube's modern transcript panel, it captures the visible captions as displayed without changing the language or player subtitle setting. It does not claim a language or regular/auto-generated track type that YouTube's panel does not disclose; older transcript panels keep their existing English-track selection behavior. Caption text is never included in the debug log. Its fixed ID remains `kajphiodjnkmgeidbcndikaaegghiffi` if the extension folder is moved. Keep CaptionGrab in its installed location after setup; if you move the app itself, click **Set up Chrome extension** again to refresh the host path.
+1. Open CaptionGrab from Applications and choose **Set up Chrome extension**.
+2. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the `ChromeExtension` folder revealed by CaptionGrab.
+3. If Chrome still points to an older or temporary folder, remove that stale entry and load the folder from the installed app.
 
-## Chrome transcript debug log
-If Chrome transcript automation fails, leave CaptionGrab open and click **Copy debug log** beneath the error. Paste the copied text into your reply here. The trace includes elapsed timings, transcript-related button text/ARIA labels and visibility, open panel identifiers, and controls the extension clicked or attempted. It does not include transcript caption text.
+Keep CaptionGrab in Applications after setup. If you move it, run setup again to refresh the Native Messaging helper path.
+If automatic panel opening fails, use **Copy debug log** to capture a privacy-safe trace; caption text is not included.
 
-## Build and test
+</details>
 
-Requires Xcode and macOS 26 or later:
+## Privacy
+
+CaptionGrab contacts YouTube for video information and captions. It uses no account, API key, paid service, AI, analytics, or third-party transcription service. Recent-video history and preferences stay on your Mac; exports go only to the location you choose.
+
+> CaptionGrab is an unofficial tool and is not affiliated with or endorsed by YouTube or Google. YouTube may change the web-player behavior the app relies on.
+
+<details>
+<summary>Build and test</summary>
+
+Requires Xcode and macOS 26 or later.
 
 ```sh
 swift test
 bash Scripts/package-app.sh
 ```
 
-The public GitHub Actions workflow runs tests and packages the app on a standard `macos-26` runner. All caption fixtures in tests are invented sample data; tests do not contact YouTube.
+</details>
