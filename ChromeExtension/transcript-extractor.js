@@ -88,6 +88,18 @@
     return null;
   }
 
+  function isDisplayedTranscriptPanel(panel) {
+    const seen = new Set();
+    let current = panel;
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      const targetID = current.getAttribute?.('target-id') ?? current.getAttribute?.('targetId') ?? '';
+      if (targetID === 'PAmodern_transcript_view' || targetID === 'engagement-panel-searchable-transcript') return true;
+      current = current.parentElement ?? current.getRootNode?.()?.host ?? null;
+    }
+    return false;
+  }
+
   function domElements(root) {
     const elements = [];
     const pending = [root];
@@ -348,6 +360,7 @@
     parseTimestamp,
     extractCues,
     extractTranscriptCues,
+    isDisplayedTranscriptPanel,
     choosePreferredEnglishLanguage,
     selectPreferredEnglishTranscript,
     buildCaptureMessage

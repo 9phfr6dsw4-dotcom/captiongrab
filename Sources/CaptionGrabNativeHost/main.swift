@@ -66,6 +66,13 @@ func validate(_ message: ChromeTranscriptMessage) throws -> UUID {
             expectedVideoID: message.videoID,
             canonicalURL: canonicalURL
         )
+    } else if message.type == "captiongrab.transcript-fallback" {
+        let canonicalURL = URL(string: "https://www.youtube.com/watch?v=\(message.videoID)")!
+        _ = try message.makeOnDeviceFallbackInput(
+            expectedRequestID: message.requestID,
+            expectedVideoID: message.videoID,
+            canonicalURL: canonicalURL
+        )
     } else if message.type == "captiongrab.error" {
         guard let error = message.error, !error.isEmpty, error.count <= 1_000 else {
             throw NativeHostFailure.invalidRequest
