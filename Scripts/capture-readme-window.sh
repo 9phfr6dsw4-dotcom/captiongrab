@@ -81,6 +81,10 @@ ICON_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP_PATH/Con
 [[ "$ICON_NAME" == *.icns ]] || ICON_NAME="$ICON_NAME.icns"
 [[ -s "$APP_PATH/Contents/Resources/$ICON_NAME" ]]
 codesign --verify --deep --strict "$APP_PATH"
+swiftc Scripts/focus-readme-link-field.swift \
+  -framework AppKit \
+  -framework ApplicationServices \
+  -o "$CAPTURE_ROOT/focus-link-field"
 swiftc Scripts/verify-and-capture-readme-window.swift \
   -framework AppKit \
   -framework CoreGraphics \
@@ -91,8 +95,8 @@ swiftc Scripts/verify-and-capture-readme-window.swift \
 printf '%s\n' 'Launching the verified release app and submitting the public video URL with Return.'
 unset GH_TOKEN GITHUB_TOKEN
 open "$APP_PATH"
-sleep 3
-osascript Scripts/submit-readme-video.applescript "$VIDEO_URL"
+"$CAPTURE_ROOT/focus-link-field" "$VIDEO_URL"
+osascript Scripts/submit-readme-video.applescript
 
 ACCESSIBILITY_TEXT="$(osascript Scripts/wait-for-readme-transcript.applescript "$VIDEO_ID")"
 printf '%s' "$ACCESSIBILITY_TEXT" | python3 Scripts/verify_transcript_accessibility.py "$VIDEO_ID"
