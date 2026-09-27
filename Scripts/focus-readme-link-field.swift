@@ -125,7 +125,7 @@ private enum StartupReadinessError: Error, Equatable, CustomStringConvertible {
 private func waitForUniqueMatch<Value>(
     timeout: TimeInterval = startupReadinessTimeout,
     pollInterval: TimeInterval = startupPollInterval,
-    now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+    now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
     sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
     candidates: (AccessibilityQueryDeadline) throws -> [Value]
 ) throws -> Value {
