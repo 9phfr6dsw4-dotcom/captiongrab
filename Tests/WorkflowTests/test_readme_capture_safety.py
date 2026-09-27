@@ -147,6 +147,8 @@ class ReadmeCaptureWorkflowTests(unittest.TestCase):
         self.assertIn("Readiness fixture times out when no exact field appears.", focus_text)
         self.assertIn("Ambiguous readiness must fail without retrying.", focus_text)
         self.assertIn("Enumeration failure must fail without retrying.", focus_text)
+        self.assertIn("AX attribute query failures must not count as non-matches.", focus_text)
+        self.assertIn("A slow descendant AX call must be bounded by the remaining startup deadline.", focus_text)
 
     def test_capture_uses_bounded_window_and_exact_field_readiness(self):
         focus_text = FOCUS_SCRIPT.read_text(encoding="utf-8")

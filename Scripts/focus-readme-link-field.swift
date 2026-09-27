@@ -19,22 +19,79 @@ private func fail(_ message: String) -> Never {
     exit(1)
 }
 
-private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+private func checkedAttributeValue<Value>(
+    status: AXError,
+    value: Value?,
+    attribute: String
+) throws -> Value? {
+    switch status {
+    case .success:
+        guard let value else {
+            throw AccessibilityTraversalError.attributeValueMissing(attribute: attribute)
+        }
+        return value
+    case .noValue:
+        return nil
+    default:
+        throw AccessibilityTraversalError.attributeQueryFailed(
+            attribute: attribute,
+            status: Int(status.rawValue)
+        )
+    }
+}
+
+private func attribute(
+    _ element: AXUIElement,
+    _ name: String,
+    deadline: AccessibilityQueryDeadline? = nil
+) throws -> CFTypeRef? {
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else {
+    let status = try performBoundedAccessibilityMessage(
+        on: element,
+        deadline: deadline,
+        setMessagingTimeout: { AXUIElementSetMessagingTimeout($0, $1) },
+        operation: { _ in
+            AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        }
+    )
+    return try checkedAttributeValue(status: status, value: value, attribute: name)
+}
+
+private func stringAttribute(
+    _ element: AXUIElement,
+    _ name: String,
+    deadline: AccessibilityQueryDeadline? = nil
+) throws -> String? {
+    guard let value = try attribute(element, name, deadline: deadline) else {
         return nil
     }
-    return value
+    guard let string = value as? String else {
+        throw AccessibilityTraversalError.attributeValueTypeMismatch(attribute: name)
+    }
+    return string
 }
 
-private func stringAttribute(_ element: AXUIElement, _ name: String) -> String? {
-    attribute(element, name) as? String
-}
-
-private func isAttributeSettable(_ element: AXUIElement, _ name: String) -> Bool {
+private func isAttributeSettable(
+    _ element: AXUIElement,
+    _ name: String,
+    deadline: AccessibilityQueryDeadline? = nil
+) throws -> Bool {
     var settable = DarwinBoolean(false)
-    return AXUIElementIsAttributeSettable(element, name as CFString, &settable) == .success
-        && settable.boolValue
+    let status = try performBoundedAccessibilityMessage(
+        on: element,
+        deadline: deadline,
+        setMessagingTimeout: { AXUIElementSetMessagingTimeout($0, $1) },
+        operation: { _ in
+            AXUIElementIsAttributeSettable(element, name as CFString, &settable)
+        }
+    )
+    guard status == .success else {
+        throw AccessibilityTraversalError.attributeQueryFailed(
+            attribute: name,
+            status: Int(status.rawValue)
+        )
+    }
+    return settable.boolValue
 }
 
 private func isYouTubeLinkField(_ field: AccessibilityFieldDescriptor) -> Bool {
@@ -70,27 +127,23 @@ private func waitForUniqueMatch<Value>(
     pollInterval: TimeInterval = startupPollInterval,
     now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
     sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
-    candidates: () throws -> [Value]
+    candidates: (AccessibilityQueryDeadline) throws -> [Value]
 ) throws -> Value {
-    let deadline = now() + timeout
+    let deadline = AccessibilityQueryDeadline(timeout: timeout, now: now)
 
     while true {
-        let currentCandidates = try candidates()
+        try deadline.check()
+        let currentCandidates = try candidates(deadline)
+        try deadline.check()
         guard currentCandidates.count <= 1 else {
             throw StartupReadinessError.ambiguousMatches(count: currentCandidates.count)
-        }
-        guard now() <= deadline else {
-            throw StartupReadinessError.timedOut(timeout: timeout)
         }
 
         if currentCandidates.count == 1 {
             return currentCandidates[0]
         }
 
-        let remaining = deadline - now()
-        guard remaining > 0 else {
-            throw StartupReadinessError.timedOut(timeout: timeout)
-        }
+        let remaining = try deadline.remaining()
         sleep(min(pollInterval, remaining))
     }
 }
@@ -103,6 +156,10 @@ private enum AccessibilityTraversalError: Error, Equatable, CustomStringConverti
     case nodeLimitExceeded(limit: Int)
     case childEnumerationFailed
     case windowEnumerationFailed(status: Int)
+    case attributeQueryFailed(attribute: String, status: Int)
+    case attributeValueMissing(attribute: String)
+    case attributeValueTypeMismatch(attribute: String)
+    case messagingTimeoutFailed(status: Int)
 
     var description: String {
         switch self {
@@ -114,8 +171,65 @@ private enum AccessibilityTraversalError: Error, Equatable, CustomStringConverti
             return "a node's children could not be enumerated"
         case .windowEnumerationFailed(let status):
             return "CaptionGrab's windows could not be enumerated (AX status \(status))"
+        case .attributeQueryFailed(let attribute, let status):
+            return "AX attribute \(attribute) could not be queried (AX status \(status))"
+        case .attributeValueMissing(let attribute):
+            return "AX attribute \(attribute) query succeeded without a value"
+        case .attributeValueTypeMismatch(let attribute):
+            return "AX attribute \(attribute) returned a value of the wrong type"
+        case .messagingTimeoutFailed(let status):
+            return "AX messaging timeout could not be set (AX status \(status))"
         }
     }
+}
+
+private struct AccessibilityQueryDeadline {
+    let timeout: TimeInterval
+    let deadline: TimeInterval
+    private let now: () -> TimeInterval
+
+    init(timeout: TimeInterval, now: @escaping () -> TimeInterval) {
+        self.timeout = timeout
+        self.deadline = now() + timeout
+        self.now = now
+    }
+
+    func remaining() throws -> TimeInterval {
+        let remaining = deadline - now()
+        guard remaining > 0 else {
+            throw StartupReadinessError.timedOut(timeout: timeout)
+        }
+        return remaining
+    }
+
+    func check() throws {
+        _ = try remaining()
+    }
+}
+
+private let maximumAccessibilityMessageTimeout: TimeInterval = 1.0
+
+// AX messaging timeouts are per element; set a bound before every synchronous call.
+private func performBoundedAccessibilityMessage<Element, Value>(
+    on element: Element,
+    deadline: AccessibilityQueryDeadline?,
+    setMessagingTimeout: (Element, Float) -> AXError,
+    operation: (TimeInterval) throws -> Value
+) throws -> Value {
+    let allowedDuration = try deadline.map {
+        min(maximumAccessibilityMessageTimeout, try $0.remaining())
+    } ?? maximumAccessibilityMessageTimeout
+    let timeout = Float(allowedDuration)
+    let timeoutStatus = setMessagingTimeout(element, timeout)
+    guard timeoutStatus == .success else {
+        throw AccessibilityTraversalError.messagingTimeoutFailed(
+            status: Int(timeoutStatus.rawValue)
+        )
+    }
+    try deadline?.check()
+    let value = try operation(TimeInterval(timeout))
+    try deadline?.check()
+    return value
 }
 
 private func traverseAccessibilityTree<Node>(
@@ -123,7 +237,7 @@ private func traverseAccessibilityTree<Node>(
     depthLimit: Int = maximumAccessibilityTraversalDepth,
     nodeLimit: Int = maximumVisitedAccessibilityNodes,
     children: (Node) throws -> [Node],
-    matches isMatch: (Node) -> Bool
+    matches isMatch: (Node) throws -> Bool
 ) throws -> [Node] {
     var matches: [Node] = []
     var pending: [(node: Node, depth: Int)] = [(root, 0)]
@@ -138,7 +252,7 @@ private func traverseAccessibilityTree<Node>(
             throw AccessibilityTraversalError.nodeLimitExceeded(limit: nodeLimit)
         }
 
-        if isMatch(current.node) {
+        if try isMatch(current.node) {
             matches.append(current.node)
         }
         for child in try children(current.node) {
@@ -149,29 +263,48 @@ private func traverseAccessibilityTree<Node>(
     return matches
 }
 
-private func accessibilityChildren(of element: AXUIElement) throws -> [AXUIElement] {
-    var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
-          let value,
-          let children = value as? [AXUIElement] else {
+private func accessibilityChildren(
+    of element: AXUIElement,
+    deadline: AccessibilityQueryDeadline
+) throws -> [AXUIElement] {
+    guard let value = try attribute(
+        element,
+        kAXChildrenAttribute as String,
+        deadline: deadline
+    ), let children = value as? [AXUIElement] else {
         throw AccessibilityTraversalError.childEnumerationFailed
     }
     return children
 }
 
-private func findLinkFields(in root: AXUIElement) throws -> [AXUIElement] {
+private func findLinkFields(
+    in root: AXUIElement,
+    deadline: AccessibilityQueryDeadline
+) throws -> [AXUIElement] {
     try traverseAccessibilityTree(
         root: root,
-        children: { try accessibilityChildren(of: $0) },
+        children: { try accessibilityChildren(of: $0, deadline: deadline) },
         matches: { element in
-            let role = stringAttribute(element, kAXRoleAttribute) ?? ""
-            let placeholder = stringAttribute(element, kAXPlaceholderValueAttribute)
+            let role = try stringAttribute(element, kAXRoleAttribute as String, deadline: deadline) ?? ""
+            let placeholder = try stringAttribute(
+                element,
+                kAXPlaceholderValueAttribute as String,
+                deadline: deadline
+            )
+            let valueIsSettable: Bool
+            if role == kAXTextFieldRole && placeholder == expectedPlaceholder {
+                valueIsSettable = try isAttributeSettable(
+                    element,
+                    kAXValueAttribute as String,
+                    deadline: deadline
+                )
+            } else {
+                valueIsSettable = false
+            }
             return isYouTubeLinkField(AccessibilityFieldDescriptor(
                 role: role,
                 placeholder: placeholder,
-                valueIsSettable: role == kAXTextFieldRole
-                    && placeholder == expectedPlaceholder
-                    && isAttributeSettable(element, kAXValueAttribute)
+                valueIsSettable: valueIsSettable
             ))
         }
     )
@@ -182,22 +315,28 @@ private struct LocatedLinkField {
     let field: AXUIElement
 }
 
-private func accessibilityWindows(of appElement: AXUIElement) throws -> [AXUIElement] {
-    var value: CFTypeRef?
-    let status = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value)
-    if status == .noValue {
+private func accessibilityWindows(
+    of appElement: AXUIElement,
+    deadline: AccessibilityQueryDeadline
+) throws -> [AXUIElement] {
+    guard let value = try attribute(
+        appElement,
+        kAXWindowsAttribute as String,
+        deadline: deadline
+    ) else {
         return []
     }
-    guard status == .success, let value else {
-        throw AccessibilityTraversalError.windowEnumerationFailed(status: Int(status.rawValue))
-    }
     guard let windows = value as? [AXUIElement] else {
-        throw AccessibilityTraversalError.windowEnumerationFailed(status: Int(status.rawValue))
+        throw AccessibilityTraversalError.windowEnumerationFailed(
+            status: Int(AXError.success.rawValue)
+        )
     }
     return windows
 }
 
-private func accessibleLinkFieldCandidates() throws -> [LocatedLinkField] {
+private func accessibleLinkFieldCandidates(
+    deadline: AccessibilityQueryDeadline
+) throws -> [LocatedLinkField] {
     let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
         .filter { !$0.isTerminated }
     guard !runningApps.isEmpty else { return [] }
@@ -208,12 +347,12 @@ private func accessibleLinkFieldCandidates() throws -> [LocatedLinkField] {
     let app = runningApps[0]
     _ = app.activate(options: [.activateAllWindows])
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
-    _ = AXUIElementSetMessagingTimeout(appElement, 1.0)
-    let windows = try accessibilityWindows(of: appElement)
+    let windows = try accessibilityWindows(of: appElement, deadline: deadline)
 
     return try windows.flatMap { window in
-        _ = AXUIElementSetMessagingTimeout(window, 1.0)
-        return try findLinkFields(in: window).map { LocatedLinkField(appElement: appElement, field: $0) }
+        try findLinkFields(in: window, deadline: deadline).map {
+            LocatedLinkField(appElement: appElement, field: $0)
+        }
     }
 }
 
@@ -221,6 +360,9 @@ private final class AccessibilityTraversalFixtureNode {
     let name: String
     let isMatch: Bool
     var children: [AccessibilityTraversalFixtureNode]? = []
+    var simulatedMessageDuration: TimeInterval = 0
+    var lastMessageTimeout: TimeInterval?
+    var messageQueryCount = 0
 
     init(_ name: String, isMatch: Bool = false) {
         self.name = name
@@ -228,9 +370,15 @@ private final class AccessibilityTraversalFixtureNode {
     }
 }
 
+private final class AccessibilityFixtureClock {
+    var value: TimeInterval = 0
+}
+
 private func fixtureMatches(
     from root: AccessibilityTraversalFixtureNode,
-    depthLimit: Int = maximumAccessibilityTraversalDepth
+    depthLimit: Int = maximumAccessibilityTraversalDepth,
+    deadline: AccessibilityQueryDeadline? = nil,
+    clock: AccessibilityFixtureClock? = nil
 ) throws -> [AccessibilityTraversalFixtureNode] {
     try traverseAccessibilityTree(
         root: root,
@@ -239,7 +387,26 @@ private func fixtureMatches(
             guard let children = node.children else {
                 throw AccessibilityTraversalError.childEnumerationFailed
             }
-            return children
+            guard let deadline else { return children }
+            return try performBoundedAccessibilityMessage(
+                on: node,
+                deadline: deadline,
+                setMessagingTimeout: { fixtureNode, timeout in
+                    fixtureNode.lastMessageTimeout = TimeInterval(timeout)
+                    return .success
+                },
+                operation: { timeout in
+                    node.messageQueryCount += 1
+                    if let clock {
+                        if node.simulatedMessageDuration >= timeout {
+                            clock.value = deadline.deadline
+                        } else {
+                            clock.value += node.simulatedMessageDuration
+                        }
+                    }
+                    return children
+                }
+            )
         },
         matches: { $0.isMatch }
     )
@@ -342,7 +509,7 @@ private func runLocatorSelfTests() throws {
         pollInterval: 0.2,
         now: { delayedClock },
         sleep: { delayedClock += $0 },
-        candidates: {
+        candidates: { _ in
             delayedAttempts += 1
             return delayedAttempts >= 3 ? [expected] : []
         }
@@ -360,7 +527,7 @@ private func runLocatorSelfTests() throws {
             pollInterval: 0.2,
             now: { timeoutClock },
             sleep: { timeoutClock += $0 },
-            candidates: {
+            candidates: { _ in
                 timeoutAttempts += 1
                 return [AccessibilityFieldDescriptor]()
             }
@@ -380,7 +547,7 @@ private func runLocatorSelfTests() throws {
             pollInterval: 0.2,
             now: { 0 },
             sleep: { _ in preconditionFailure("Ambiguous readiness must not sleep.") },
-            candidates: {
+            candidates: { _ in
                 ambiguityAttempts += 1
                 return [expected, expected]
             }
@@ -400,7 +567,7 @@ private func runLocatorSelfTests() throws {
             pollInterval: 0.2,
             now: { 0 },
             sleep: { _ in preconditionFailure("Enumeration failure must not sleep.") },
-            candidates: {
+            candidates: { _ in
                 enumerationAttempts += 1
                 return try fixtureMatches(from: incompleteRoot)
             }
@@ -413,14 +580,78 @@ private func runLocatorSelfTests() throws {
         )
     }
 
+    var queryErrorAttempts = 0
+    do {
+        _ = try waitForUniqueMatch(
+            timeout: 1,
+            pollInterval: 0.2,
+            now: { 0 },
+            sleep: { _ in preconditionFailure("AX query errors must not be retried as missing attributes.") },
+            candidates: { _ in
+                queryErrorAttempts += 1
+                var candidates = [expected]
+                let placeholder: String? = try checkedAttributeValue(
+                    status: .cannotComplete,
+                    value: nil as String?,
+                    attribute: "AXPlaceholderValue"
+                )
+                if let placeholder {
+                    candidates.append(AccessibilityFieldDescriptor(
+                        role: kAXTextFieldRole,
+                        placeholder: placeholder,
+                        valueIsSettable: true
+                    ))
+                }
+                return candidates
+            }
+        )
+        preconditionFailure("AX attribute query failures must not count as non-matches.")
+    } catch let error as AccessibilityTraversalError {
+        precondition(
+            error == .attributeQueryFailed(
+                attribute: "AXPlaceholderValue",
+                status: Int(AXError.cannotComplete.rawValue)
+            ) && queryErrorAttempts == 1,
+            "AX attribute query failures must not count as non-matches."
+        )
+    }
+
+    let slowRoot = AccessibilityTraversalFixtureNode("slow-root")
+    let slowDescendant = AccessibilityTraversalFixtureNode("slow-matching-descendant", isMatch: true)
+    slowRoot.children = [slowDescendant]
+    slowRoot.simulatedMessageDuration = 0.8
+    slowDescendant.simulatedMessageDuration = 1.0
+    let slowClock = AccessibilityFixtureClock()
+    do {
+        _ = try waitForUniqueMatch(
+            timeout: 1,
+            pollInterval: 0.2,
+            now: { slowClock.value },
+            sleep: { slowClock.value += $0 },
+            candidates: { deadline in
+                try fixtureMatches(from: slowRoot, deadline: deadline, clock: slowClock)
+            }
+        )
+        preconditionFailure("A slow descendant AX call must be bounded by the remaining startup deadline.")
+    } catch let error as StartupReadinessError {
+        let descendantTimeout = slowDescendant.lastMessageTimeout ?? 0
+        precondition(
+            error == .timedOut(timeout: 1)
+                && slowDescendant.messageQueryCount == 1
+                && descendantTimeout > 0.19
+                && descendantTimeout < 0.21,
+            "A slow descendant AX call must be bounded by the remaining startup deadline."
+        )
+    }
+
     print("Accessibility locator self-tests passed.")
 }
 
-private func focusAndSetYouTubeLinkField(to videoURL: String) {
+private func focusAndSetYouTubeLinkField(to videoURL: String) throws {
     let locatedField: LocatedLinkField
     do {
-        locatedField = try waitForUniqueMatch(candidates: {
-            try accessibleLinkFieldCandidates()
+        locatedField = try waitForUniqueMatch(candidates: { deadline in
+            try accessibleLinkFieldCandidates(deadline: deadline)
         })
     } catch let error as AccessibilityTraversalError {
         fail("CaptionGrab's accessibility tree was incomplete; refusing to accept a possibly non-unique match (\(error)).")
@@ -431,17 +662,25 @@ private func focusAndSetYouTubeLinkField(to videoURL: String) {
     let appElement = locatedField.appElement
     let linkField = locatedField.field
 
-    guard AXUIElementSetAttributeValue(
-        linkField,
-        kAXValueAttribute as CFString,
-        videoURL as CFString
-    ) == .success else {
+    let valueStatus = try performBoundedAccessibilityMessage(
+        on: linkField,
+        deadline: nil,
+        setMessagingTimeout: { AXUIElementSetMessagingTimeout($0, $1) },
+        operation: { _ in
+            AXUIElementSetAttributeValue(
+                linkField,
+                kAXValueAttribute as CFString,
+                videoURL as CFString
+            )
+        }
+    )
+    guard valueStatus == .success else {
         fail("CaptionGrab's accessible YouTube link field rejected the video URL.")
     }
 
     var hasExpectedValue = false
     for _ in 0..<10 {
-        if stringAttribute(linkField, kAXValueAttribute) == videoURL {
+        if try stringAttribute(linkField, kAXValueAttribute as String) == videoURL {
             hasExpectedValue = true
             break
         }
@@ -451,17 +690,25 @@ private func focusAndSetYouTubeLinkField(to videoURL: String) {
         fail("CaptionGrab's accessible YouTube link field did not retain the submitted video URL.")
     }
 
-    guard AXUIElementSetAttributeValue(
-        linkField,
-        kAXFocusedAttribute as CFString,
-        kCFBooleanTrue
-    ) == .success else {
+    let focusStatus = try performBoundedAccessibilityMessage(
+        on: linkField,
+        deadline: nil,
+        setMessagingTimeout: { AXUIElementSetMessagingTimeout($0, $1) },
+        operation: { _ in
+            AXUIElementSetAttributeValue(
+                linkField,
+                kAXFocusedAttribute as CFString,
+                kCFBooleanTrue
+            )
+        }
+    )
+    guard focusStatus == .success else {
         fail("CaptionGrab's accessible YouTube link field did not accept keyboard focus.")
     }
 
     var hasKeyboardFocus = false
     for _ in 0..<10 {
-        if let focusedElement = attribute(appElement, kAXFocusedUIElementAttribute),
+        if let focusedElement = try attribute(appElement, kAXFocusedUIElementAttribute as String),
            CFEqual(focusedElement, linkField) {
             hasKeyboardFocus = true
             break
@@ -484,5 +731,9 @@ if arguments == ["--self-test"] {
     guard arguments.count == 1 else {
         fail("Exactly one public video URL is required.")
     }
-    focusAndSetYouTubeLinkField(to: arguments[0])
+    do {
+        try focusAndSetYouTubeLinkField(to: arguments[0])
+    } catch {
+        fail("CaptionGrab accessibility operation failed; refusing to submit (\(error)).")
+    }
 }
