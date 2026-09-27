@@ -482,7 +482,7 @@ private func runLocatorSelfTests() throws {
             "Depth-limit traversal must fail closed."
         )
     } catch {
-        preconditionFailure("Depth-limit traversal must fail closed: \\(error).")
+        preconditionFailure("Depth-limit traversal must fail closed: \(error).")
     }
 
     let incompleteRoot = AccessibilityTraversalFixtureNode("root")
@@ -499,7 +499,7 @@ private func runLocatorSelfTests() throws {
             "Unreadable child enumeration must fail the whole traversal."
         )
     } catch {
-        preconditionFailure("Unreadable child enumeration must fail the whole traversal: \\(error).")
+        preconditionFailure("Unreadable child enumeration must fail the whole traversal: \(error).")
     }
 
     var delayedClock: TimeInterval = 0
@@ -725,7 +725,7 @@ if arguments == ["--self-test"] {
     do {
         try runLocatorSelfTests()
     } catch {
-        fail("Accessibility locator self-tests failed: \\(error).")
+        fail("Accessibility locator self-tests failed: \(error).")
     }
 } else {
     guard arguments.count == 1 else {
